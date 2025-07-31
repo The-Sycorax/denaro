@@ -28,7 +28,7 @@
   
   - `--setup-db`: Limits the setup script's actions to only configure the PostgreSQL database, excluding the execution of other operations such as virtual environment setup and dependency installation.
 
-  - `--skip-package-install`: Skips APT package installation. This can be used for Linux distributions that do not utilize APT as a package manager. However, it is important that the required system packages are installed prior to running the setup script (For more details refer to: *Installation for Non-Debian Based Systems*).
+  - `--skip-package-install`: Skips `apt` package installation. This argument can be used for Linux distributions that do not utilize `apt` as a package manager. However, it is important that the required system packages are installed prior to running the setup script (For more details refer to: *Installation for Non-Debian Based Systems*).
 
 **Execute the commands below to initiate the installation:**
 
@@ -52,7 +52,9 @@
 <dl><dd>
 <dl><dd>
 
- The setup script is designed for Linux distributions that utilize `apt` as their package manager (e.g. Debian/Ubuntu). If system package installation is unsuccessful, it may be due to the absence of apt on your system. In which case, the required system packages must be installed manually. Below you will find a list of the required system packages.
+ The setup script is designed for Linux distributions that utilize `apt` as their package manager (e.g. Debian/Ubuntu). If system package installation is unsuccessful, it most likely due to the absence of `apt` on your system. This is generally the case for Non-Debian Linux distributions. 
+ 
+ Therefore, the required system packages must be installed manually. Below you will find a list of the required system packages.
 
 <details>
 <summary>Required Packages:</summary>
@@ -63,9 +65,9 @@
 - `gcc`
 - `libgmp-dev`
 - `libpq-dev`
-- `postgresql`
+- `postgresql-15`
 - `python3`
-- `python3-venv` (If using a python virtual environment)
+- `python3-venv`
 - `sudo`
   
 </dd></dl>
@@ -77,11 +79,18 @@ Once the required packages have been installed, the `--skip-package-install` arg
 </dd></dl>
 </details>
 
+**Setup with Docker**:
+
+  ```bash
+  make build
+  docker-compose up -d
+  ```
+
 ## Running a Denaro Node
 
 A Denaro node can be started manually if you have already executed the `setup.sh` script and chose not to start the node immediately, or if you need to start the node in a new terminal session. 
 
-***Note:** Users who have used the setup script with the `--setup-db` argument or have performed a manual installation, should create a Python virtual environment (Optional) and ensure that the required Python packages are installed prior to starting a node.*
+***Note:** For users who have used the setup script with the `--setup-db` argument or have performed a manual installation, it is reccomended that a Python virtual environment is set up and that the required Python packages are installed prior to starting a node.*
 
 Execute the commands below to manually start a Denaro node:
 
@@ -89,7 +98,7 @@ Execute the commands below to manually start a Denaro node:
 # Navigate to the Denaro directory.
 cd path/to/denaro
 
-# Set up a Python virtual environment (Optional but recommended).
+# Set up a Python virtual environment (Optional).
 sudo apt install python3-venv
 python3 -m venv venv
 source venv/bin/activate
@@ -98,7 +107,7 @@ source venv/bin/activate
 pip install -r requirements.txt
 
 # Manualy start the Denaro node on port 3006 or another specified port.
-uvicorn denaro.node.main:app --port 3006
+uvicorn denaro.node.main:app --host 127.0.0.1 --port 3006
 
 # To stop the node, press Ctrl+C in the terminal.
 ```
@@ -107,21 +116,6 @@ To exit a Python virtual environment, use the command:
 
 ```bash
 deactivate
-```
-
-## Setup with Docker
-
-```bash
-make build
-docker-compose up -d
-```
-
-## Sync Blockchain
-
-To synchronize a node with the Denaro blockchain, send a request to the `/sync_blockchain` endpoint after starting your node:
-
-```bash
-curl http://localhost:3006/sync_blockchain
 ```
 
 ## Mining
@@ -148,6 +142,69 @@ curl http://localhost:3006/sync_blockchain
   - Block rewards decrease by half over time until they reach zero.
   - Rewards start at `100` for the initial `150,000` blocks, decreasing in predetermined steps until a final reward of `0.3125` for the `458,733`rd block.
   - After this, blocks do not offer a mining reward, but transaction fees are still applicable. A transaction may also have no fees at all.
+
+- **The `miner.py` script can be used to mine Denaro**:
+          
+  <details>
+  <summary><b>Usage:</b></summary>
+  <dl><dd>
+  
+  - **Syntax**:
+      ```bash
+      miner.py [-h] [-a ADDRESS] [-n NODE] [-w WORKERS] 
+      ```
+  
+  - **Arguments**:
+        
+      * `--address`, `-a` (Required): Your public Denaro wallet address where mining rewards will be sent.
+
+      * `--workers`, `-w` (Optional): The number of parallel processes to run. It's recommended to set this to the number of CPU cores you want to use for mining. Defaults to 1.
+
+      * `--node`, `-n` (Optional): The URL of the Denaro node API to connect to for mining data. Defaults to http://127.0.0.1:3006/. 
+
+      * `--help`, `-h`: Shows the help message.
+
+  <details>
+  <summary><b>Examples:</b></summary>
+  <dl><dd>
+  
+  - #### 1. Basic Mining (Single Core)
+    To start mining to your address using a single CPU core and the default local node:
+    
+    ```bash
+    python3 miner.py --address YOUR_WALLET_ADDRESS
+    ```
+  
+  - #### 2. Mining with a Remote Node
+  
+    To mine using 4 cores while connected to a specific public node:
+    
+    ```bash
+    python3 miner.py --address YOUR_WALLET_ADDRESS --node http://a-public-node.com:3006
+    ```
+  
+  - #### 3. Mining with Multiple Cores
+  
+    To mine using 8 CPU cores for higher performance:
+    
+    ```bash
+    python3 miner.py --address YOUR_WALLET_ADDRESS --workers 8
+    ```
+  
+  *(Replace `YOUR_WALLET_ADDRESS` with your actual Denaro address)*
+    
+  </dd></dl>
+  </dd></dl>
+  </details>
+
+
+## Sync Blockchain
+
+To synchronize a node with the Denaro blockchain, send a request to the `/sync_blockchain` endpoint after starting your node:
+
+```bash
+curl http://127.0.0.1:3006/sync_blockchain
+```
 
 ## License
 Denaro is released under the terms of the GNU Affero General Public License v3.0. See [LICENSE](LICENSE) for more information or goto https://www.gnu.org/licenses/agpl-3.0.en.html

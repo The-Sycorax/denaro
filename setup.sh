@@ -2,7 +2,7 @@
 
 # Author: The-Sycorax (https://github.com/The-Sycorax)
 # License: MIT
-# Copyright (c) 2024
+# Copyright (c) 2024-2025
 #
 # Overview:
 # This bash script automates the setup required to run a Denaro node. It handles system
@@ -702,10 +702,10 @@ validate_start_node_response() {
 # Validate start_node input
 start_node(){
     echo ""
-    echo "Starting Denaro node on port $DENARO_NODE_PORT..."
+    echo "Starting Denaro node on http://$DENARO_NODE_HOST:$DENARO_NODE_PORT..."
     echo "Press Ctrl+C to exit."
     echo ""
-    uvicorn denaro.node.main:app --port $DENARO_NODE_PORT || { echo "Failed to start Denaro Node"; exit 1; }
+    uvicorn denaro.node.main:app --host $DENARO_NODE_HOST --port $DENARO_NODE_PORT || { echo "Failed to start Denaro Node"; exit 1; }
 }
 
 if $SKIP_PROMPTS; then
