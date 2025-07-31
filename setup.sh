@@ -36,6 +36,8 @@ DENARO_DATABASE_NAME="denaro"
 DENARO_DATABASE_HOST="127.0.0.1"
 DENARO_NODE_HOST="127.0.0.1"
 DENARO_NODE_PORT="3006"
+MAIN_DENARO_NODE="https://denaro-node.gaetano.eu.org"
+
 USE_DEFAULT_ENV_VARS=false 
 # Path to the .env file
 env_file=".env"
@@ -170,7 +172,7 @@ load_env_variables() {
     if [[ -f "$env_file" ]]; then
         #echo "Loading existing configurations..."
         while IFS='=' read -r key value; do
-            if [[ $key == DENARO_DATABASE_USER || $key == DENARO_DATABASE_PASSWORD || $key == DENARO_DATABASE_NAME || $key == DENARO_DATABASE_HOST || $key == DENARO_NODE_HOST || $key == DENARO_NODE_PORT ]]; then
+            if [[ $key == DENARO_DATABASE_USER || $key == DENARO_DATABASE_PASSWORD || $key == DENARO_DATABASE_NAME || $key == DENARO_DATABASE_HOST || $key == DENARO_NODE_HOST || $key == DENARO_NODE_PORT || $key == MAIN_DENARO_NODE ]]; then
                 eval $key="'$value'"
             fi
         done < "$env_file"
@@ -195,6 +197,7 @@ identify_missing_variables() {
     grep -qE "^DENARO_DATABASE_HOST=.+" "$env_file" || missing_vars+=("DENARO_DATABASE_HOST")
     grep -qE "^DENARO_NODE_HOST=.+" "$env_file" || missing_vars+=("DENARO_NODE_HOST")
     grep -qE "^DENARO_NODE_PORT=.+" "$env_file" || missing_vars+=("DENARO_NODE_PORT")
+    grep -qE "^MAIN_DENARO_NODE=.+" "$env_file" || missing_vars+=("MAIN_DENARO_NODE")
 
     echo "${missing_vars[@]}"
 }
@@ -245,7 +248,6 @@ update_variable() {
         elif [[ "$var_name" == "DENARO_NODE_PORT" ]]; then
             # Special handling for port input with validation
             validate_port_input "$prompt ($prompt_value_string $var_value):" "$var_name" $show_current_vars
-
         else
             # Prompt for other inputs with showing the default value
             read -p "$prompt ($prompt_value_string $var_value): " value
@@ -306,7 +308,7 @@ set_env_variables() {
                             local update_missing_vars=true
                             local show_current_vars=true
                             PROMPT_FOR_DEFAUT=false
-                            missing_vars=("DENARO_DATABASE_USER" "DENARO_DATABASE_PASSWORD" "DENARO_DATABASE_NAME" "DENARO_DATABASE_HOST" "DENARO_NODE_HOST" "DENARO_NODE_PORT")
+                            missing_vars=("DENARO_DATABASE_USER" "DENARO_DATABASE_PASSWORD" "DENARO_DATABASE_NAME" "DENARO_DATABASE_HOST" "DENARO_NODE_HOST" "DENARO_NODE_PORT", "MAIN_DENARO_NODE")
                             echo "Leave blank to keep the current value."
                             echo ""
                             break;;
@@ -376,7 +378,8 @@ set_env_variables() {
     [[ " ${missing_vars[*]} " =~ " DENARO_DATABASE_HOST " ]] && update_variable "Enter database host" "DENARO_DATABASE_HOST" $update_missing_vars $show_current_vars
     [[ " ${missing_vars[*]} " =~ " DENARO_NODE_HOST " ]] && update_variable "Enter local Denaro node address or hostname" "DENARO_NODE_HOST" $update_missing_vars $show_current_vars
     [[ " ${missing_vars[*]} " =~ " DENARO_NODE_PORT " ]] && update_variable "Enter local Denaro node port" "DENARO_NODE_PORT" $update_missing_vars $show_current_vars
-    
+    [[ " ${missing_vars[*]} " =~ " MAIN_DENARO_NODE " ]] && update_variable "Enter the url of a main Denaro node to sync with" "MAIN_DENARO_NODE" $update_missing_vars $show_current_vars
+
     local new_db_user=$(read_env_variable "DENARO_DATABASE_USER" | sha256sum | cut -d' ' -f1)
     local new_db_pass=$(read_env_variable "DENARO_DATABASE_PASSWORD" | sha256sum | cut -d' ' -f1)
     local new_db_name=$(read_env_variable "DENARO_DATABASE_NAME" | sha256sum | cut -d' ' -f1)

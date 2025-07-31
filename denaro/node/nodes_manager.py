@@ -5,6 +5,7 @@ from random import sample
 
 import httpx
 import pickledb
+from dotenv import dotenv_values
 
 from ..constants import MAX_BLOCK_SIZE_HEX
 from ..helpers import timestamp
@@ -18,6 +19,9 @@ if not exists(path):
     json.dump({}, open(path, 'wt'))
 db = pickledb.load(path, True)
 
+config = dotenv_values(".env")
+
+MAIN_DENARO_NODE = config.get("MAIN_DENARO_NODE", "https://denaro-node.gaetano.eu.org")
 
 class NodesManager:
     last_messages: dict = None
@@ -30,8 +34,8 @@ class NodesManager:
     @staticmethod
     def init():
         NodesManager.db._loaddb()
-        NodesManager.nodes = NodesManager.db.get('nodes') or ['https://denaro-node.gaetano.eu.org']
-        NodesManager.last_messages = NodesManager.db.get('last_messages') or {'https://denaro-node.gaetano.eu.org': timestamp()}
+        NodesManager.nodes = NodesManager.db.get('nodes') or [MAIN_DENARO_NODE]
+        NodesManager.last_messages = NodesManager.db.get('last_messages') or {MAIN_DENARO_NODE: timestamp()}
 
     @staticmethod
     def sync():
