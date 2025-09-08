@@ -1,122 +1,94 @@
+# denaro/manager.py
 import hashlib
 from decimal import Decimal
 from io import BytesIO
 from math import ceil, floor, log
 from typing import Tuple, List, Union
 
-from icecream import ic
-
 from . import Database
-from .constants import MAX_SUPPLY, ENDIAN, MAX_BLOCK_SIZE_HEX
-from .database import OLD_BLOCKS_TRANSACTIONS_ORDER
+from .constants import ENDIAN, MAX_BLOCK_SIZE_HEX
 from .helpers import sha256, timestamp, bytes_to_string, string_to_bytes
 from .transactions import CoinbaseTransaction, Transaction
 
+# --- Canonical Chain Parameters ---
 BLOCK_TIME = 180
-BLOCKS_COUNT = Decimal(500)
+BLOCKS_PER_ADJUSTMENT = 512
 START_DIFFICULTY = Decimal('6.0')
 
-_print = print
-print = ic
-
-
-def difficulty_to_hashrate_old(difficulty: Decimal) -> int:
-    decimal = difficulty % 1 or 1/16
-    return Decimal(16 ** int(difficulty) * (16 * decimal))
-
-
 def difficulty_to_hashrate(difficulty: Decimal) -> int:
-    decimal = difficulty % 1
-    return Decimal(16 ** int(difficulty) * (16 / ceil(16 * (1 - decimal))))
-
-
-def hashrate_to_difficulty_old(hashrate: int) -> Decimal:
-    difficulty = int(log(hashrate, 16))
-    if hashrate == 16 ** difficulty:
-        return Decimal(difficulty)
-    return Decimal(difficulty + (hashrate / Decimal(16) ** difficulty) / 16)
-
-
-def hashrate_to_difficulty_wrong(hashrate: int) -> Decimal:
-    difficulty = int(log(hashrate, 16))
-    if hashrate == 16 ** difficulty:
-        return Decimal(difficulty)
-    ratio = hashrate / 16 ** difficulty
-
-    decimal = 16 / ratio / 16
-    decimal = 1 - floor(decimal * 10) / Decimal(10)
-    return Decimal(difficulty + decimal)
-
+    """Converts a difficulty score to the approximate hashrate required to solve a block."""
+    decimal_part = difficulty % 1
+    integer_part = floor(difficulty)
+    return Decimal(16 ** integer_part) * (Decimal(16) / ceil(Decimal(16) * (Decimal(1) - decimal_part)))
 
 def hashrate_to_difficulty(hashrate: int) -> Decimal:
-    difficulty = int(log(hashrate, 16))
-    ratio = hashrate / 16 ** difficulty
+    """Converts an approximate hashrate into a difficulty score."""
+    if hashrate <= 0:
+        return START_DIFFICULTY # Avoid log(0) errors
 
-    for i in range(0, 10):
-        coeff = 16 / ceil(16 * (1 - i / 10))
-        if coeff > ratio:
-            decimal = (i - 1) / Decimal(10)
-            return Decimal(difficulty + decimal)
-        if coeff == ratio:
-            decimal = i / Decimal(10)
-            return Decimal(difficulty + decimal)
+    integer_part = floor(log(hashrate, 16))
+    ratio = hashrate / (16 ** integer_part)
 
-    return Decimal(difficulty) + Decimal('0.9')
+    for i in range(10):
+        decimal_step = Decimal(i) / 10
+        coeff = Decimal(16) / ceil(Decimal(16) * (Decimal(1) - decimal_step))
+        if coeff >= ratio:
+            return Decimal(integer_part) + decimal_step
 
+    return Decimal(integer_part) + Decimal('0.9')
 
 async def calculate_difficulty() -> Tuple[Decimal, dict]:
     database = Database.instance
     last_block = await database.get_last_block()
+
     if last_block is None:
-        return START_DIFFICULTY, dict()
+        return START_DIFFICULTY, {}
+
     last_block = dict(last_block)
-    last_block['address'] = last_block['address'].strip(' ')
-    if last_block['id'] < BLOCKS_COUNT:
+    
+    if last_block['id'] < BLOCKS_PER_ADJUSTMENT:
         return START_DIFFICULTY, last_block
 
-    if last_block['id'] % BLOCKS_COUNT == 0:
-        last_adjust_block = await database.get_block_by_id(last_block['id'] - BLOCKS_COUNT + 1)
-        elapsed = last_block['timestamp'] - last_adjust_block['timestamp']
-        average_per_block = elapsed / BLOCKS_COUNT
-        last_difficulty = last_block['difficulty']
-        if last_block['id'] <= 17500:
-            hashrate = difficulty_to_hashrate_old(last_difficulty)
-        else:
-            hashrate = difficulty_to_hashrate(last_difficulty)
-        ratio = BLOCK_TIME / average_per_block
-        if last_block['id'] >= 180_000:  # from block 180k, allow difficulty to double at most
-            ratio = min(ratio, 2)
-        hashrate *= ratio
-        if last_block['id'] < 17500:
-            new_difficulty = hashrate_to_difficulty_old(hashrate)
-            new_difficulty = floor(new_difficulty * 10) / Decimal(10)
-        elif last_block['id'] < 180_000:
-            new_difficulty = hashrate_to_difficulty_wrong(hashrate)
-        else:
-            new_difficulty = hashrate_to_difficulty(hashrate)
-        return new_difficulty, last_block
+    if last_block['id'] % BLOCKS_PER_ADJUSTMENT != 0:
+        return last_block['difficulty'], last_block
 
-    return last_block['difficulty'], last_block
+    first_block_of_period = await database.get_block_by_id(last_block['id'] - BLOCKS_PER_ADJUSTMENT + 1)
+    time_elapsed = last_block['timestamp'] - first_block_of_period['timestamp']
+    if time_elapsed == 0:
+        time_elapsed = 1
+        
+    avg_block_time = time_elapsed / BLOCKS_PER_ADJUSTMENT
+    ratio = Decimal(BLOCK_TIME) / Decimal(avg_block_time)
+    ratio = max(Decimal('0.25'), min(ratio, Decimal('4.0')))
 
+    last_difficulty = last_block['difficulty']
+    current_hashrate = difficulty_to_hashrate(last_difficulty)
+    new_estimated_hashrate = current_hashrate * ratio
+    new_difficulty = hashrate_to_difficulty(new_estimated_hashrate)
+
+    print(f"Difficulty Adjustment at block {last_block['id']}:")
+    print(f"  Time Elapsed: {time_elapsed}s for {BLOCKS_PER_ADJUSTMENT} blocks.")
+    print(f"  Average Block Time: {avg_block_time:.2f}s (Target: {BLOCK_TIME}s)")
+    print(f"  Adjustment Ratio: {ratio:.4f}")
+    print(f"  Old Difficulty: {last_difficulty} -> New Difficulty: {new_difficulty}")
+
+    return new_difficulty, last_block
 
 async def get_difficulty() -> Tuple[Decimal, dict]:
     if Manager.difficulty is None:
         Manager.difficulty = await calculate_difficulty()
     return Manager.difficulty
 
-
 async def check_block_is_valid(block_content: str, mining_info: tuple = None) -> bool:
     if mining_info is None:
         mining_info = await get_difficulty()
     difficulty, last_block = mining_info
-
     block_hash = sha256(block_content)
 
-    if 'hash' not in last_block:
+    if not last_block: # Genesis block case
         return True
 
     last_block_hash = last_block['hash']
-
     decimal = difficulty % 1
     difficulty = floor(difficulty)
     if decimal > 0:
@@ -125,35 +97,42 @@ async def check_block_is_valid(block_content: str, mining_info: tuple = None) ->
         return block_hash.startswith(last_block_hash[-difficulty:]) and block_hash[difficulty] in charset[:count]
     return block_hash.startswith(last_block_hash[-difficulty:])
 
+def get_block_reward(block_number: int) -> Decimal:
+    """
+    Calculates the block reward based on a Bitcoin-style halving schedule.
+    This monetary policy is chosen for its optimal balance of a scarce total
+    supply, frequent halving events, strong initial security, and mathematical
+    elegance, with all parameters being powers of two.
 
-def get_block_reward(number: int) -> Decimal:
-    divider = floor(number / 150000)
-    if divider == 0:
-        return Decimal(100)
-    if divider > 8:
-        if number < 150000 * 9 + 458732 - 150000:
-            return Decimal('0.390625')
-        elif number < 150000 * 9 + 458733 - 150000 + 320:
-            return Decimal('0.3125')
+    - Initial Reward: 64 (2^6) DEN
+    - Halving Interval: 262,144 (2^18) blocks (targets ~2.5 years)
+    - Total Supply: 33,554,432 (2^25) DEN
+    - Emission Lifespan: ~160 years (64 halvings)
+    """
+    # --- Canonical Monetary Policy Parameters ---
+    INITIAL_REWARD = Decimal(64)
+    HALVING_INTERVAL = 262144
+    MAX_HALVINGS = 64 # A long lifespan ensures a smooth transition to a fee-based security model.
+
+    # --- Reward Calculation Logic ---
+
+    # The first block is #1. We use (block_number - 1) to ensure the first
+    # halving occurs precisely at block 262,144.
+    if block_number <= 0:
         return Decimal(0)
-    return Decimal(100) / (2 ** Decimal(divider))
+    
+    # Determine how many halving events have occurred.
+    halvings = floor((block_number - 1) / HALVING_INTERVAL)
 
-
-def __check():
-    i = 1
-    r = 0
-    index = {}
-    while n := get_block_reward(i):
-        if n not in index:
-            index[n] = 0
-        index[n] += 1
-        i += 1
-        r += n
-
-    print(r)
-    print(MAX_SUPPLY - r)
-    print(index)
-
+    # After the maximum number of halvings, the subsidy ends permanently.
+    if halvings >= MAX_HALVINGS:
+        return Decimal(0)
+        
+    # Calculate the reward for the current period.
+    # The formula is: initial_reward / (2^halvings)
+    block_reward = INITIAL_REWARD / (2 ** halvings)
+    
+    return block_reward
 
 async def clear_pending_transactions(transactions=None):
     database: Database = Database.instance
@@ -162,10 +141,8 @@ async def clear_pending_transactions(transactions=None):
     used_inputs = []
     for transaction in transactions:
         if isinstance(transaction, str):
-            tx_hash = sha256(transaction)
             transaction = await Transaction.from_hex(transaction, check_signatures=False)
-        else:
-            tx_hash = sha256(transaction.hex())
+        tx_hash = transaction.hash()
         tx_inputs = [(tx_input.tx_hash, tx_input.index) for tx_input in transaction.inputs]
         if any(used_input in tx_inputs for used_input in used_inputs):
             await database.remove_pending_transaction(tx_hash)
@@ -179,27 +156,24 @@ async def clear_pending_transactions(transactions=None):
     elif double_spend_inputs:
         await database.remove_pending_transactions_by_contains([tx_input[0] + bytes([tx_input[1]]).hex() for tx_input in double_spend_inputs])
 
-
-def get_transactions_merkle_tree_ordered(transactions: List[Union[Transaction, str]]):
-    _bytes = bytes()
-    for transaction in transactions:
-        _bytes += hashlib.sha256(bytes.fromhex(transaction.hex() if isinstance(transaction, Transaction) else transaction)).digest()
-    return hashlib.sha256(_bytes).hexdigest()
-
-
 def get_transactions_merkle_tree(transactions: List[Union[Transaction, str]]):
-    _bytes = bytes()
-    transactions_bytes = []
-    for transaction in transactions:
-        transactions_bytes.append(bytes.fromhex(transaction.hex() if isinstance(transaction, Transaction) else transaction))
-    for transaction in sorted(transactions_bytes):
-        _bytes += hashlib.sha256(transaction).digest()
-    return hashlib.sha256(_bytes).hexdigest()
+    """
+    Calculates the Merkle root for a list of transactions.
+    Hashes are sorted before concatenation to ensure a deterministic root.
+    """
+    tx_hashes = []
+    for tx in transactions:
+        if isinstance(tx, str):
+            tx_hashes.append(tx)
+        else:
+            tx_hashes.append(tx.hash())
 
+    sorted_hashes = sorted(tx_hashes)
+    concatenated_hashes = "".join(sorted_hashes)
+    return hashlib.sha256(concatenated_hashes.encode('utf-8')).hexdigest()
 
 def get_transactions_size(transactions: List[Transaction]):
     return sum(len(transaction.hex()) for transaction in transactions)
-
 
 def block_to_bytes(last_block_hash: str, block: dict) -> bytes:
     address_bytes = string_to_bytes(block['address'])
@@ -214,19 +188,11 @@ def block_to_bytes(last_block_hash: str, block: dict) -> bytes:
            int(float(block['difficulty']) * 10).to_bytes(2, ENDIAN) \
            + block['random'].to_bytes(4, ENDIAN)
 
-
 def split_block_content(block_content: str):
     _bytes = bytes.fromhex(block_content)
     stream = BytesIO(_bytes)
-    if len(_bytes) == 138:
-        version = 1
-    else:
-        version = int.from_bytes(stream.read(1), ENDIAN)
-        assert version > 1
-        if version == 2:
-            assert len(_bytes) == 108
-        else:
-            raise NotImplementedError()
+    version = 1 if len(_bytes) == 138 else int.from_bytes(stream.read(1), ENDIAN)
+
     previous_hash = stream.read(32).hex()
     address = bytes_to_string(stream.read(64 if version == 1 else 33))
     merkle_tree = stream.read(32).hex()
@@ -235,129 +201,112 @@ def split_block_content(block_content: str):
     random = int.from_bytes(stream.read(4), ENDIAN)
     return previous_hash, address, merkle_tree, timestamp, difficulty, random
 
-
 async def check_block(block_content: str, transactions: List[Transaction], mining_info: tuple = None):
     if mining_info is None:
         mining_info = await calculate_difficulty()
+    
     difficulty, last_block = mining_info
-    block_no = last_block['id'] + 1 if last_block != {} else 1
+    block_no = last_block.get('id', 0) + 1
+
+    if not await check_block_is_valid(block_content, mining_info):
+        print(f"Block {block_no} failed PoW validation.")
+        return False
+
     previous_hash, address, merkle_tree, content_time, content_difficulty, random = split_block_content(block_content)
-    if block_no == 17972 and last_block['hash'] == 'c3b69440e58e99567571e58486d8f22ed1e3107c50b827c9366294b2637cb1a0':
-        if address != 'dbda85e237b90aa669da00f2859e0010b0a62e0fb6e55ba6ca3ce8a961a60c64410bcfb6a038310a3bb6f1a4aaa2de1192cc10e380a774bb6f9c6ca8547f11ab' or \
-           content_time != 1638463765 or random != 17660081:
+
+    last_block_hash = last_block.get('hash')
+    if last_block_hash and previous_hash != last_block_hash:
+        print(f"Block {block_no} has incorrect previous hash.")
+        return False
+
+    last_timestamp = last_block.get('timestamp', 0)
+    if content_time <= last_timestamp:
+        print(f"Block {block_no} timestamp is not greater than previous block.")
+        return False
+    if content_time > timestamp() + 120:
+        print(f"Block {block_no} timestamp is too far in the future.")
+        return False
+
+    regular_transactions = [tx for tx in transactions if isinstance(tx, Transaction) and not isinstance(tx, CoinbaseTransaction)]
+    
+    if len(block_content) > MAX_BLOCK_SIZE_HEX:
+        print(f"Block {block_no} content is too large.")
+        return False
+    if get_transactions_size(regular_transactions) > MAX_BLOCK_SIZE_HEX:
+        print(f"Block {block_no} total transaction size is too large.")
+        return False
+
+    if regular_transactions:
+        check_inputs = sum([[(tx_input.tx_hash, tx_input.index) for tx_input in tx.inputs] for tx in regular_transactions], [])
+        if len(set(check_inputs)) != len(check_inputs):
+            print(f"Block {block_no} contains internal double-spend.")
             return False
-    elif not await check_block_is_valid(block_content, mining_info):
-        print('block not valid')
-        return False
-    if block_no == 143361 and sha256(block_content) == 'a53268dd22d173dd0c9c10d7f6a64f46071c669052186a7855e9cc65e9a46939':
-        for transaction in transactions:
-            if transaction.hash() == '5958b48fa0b1692b112affc7a2be887d24073027f3bef585322f33b5eeca463c':
-                transactions.remove(transaction)  # there are 2 transactions which spend same inputs in this block
-                break
-
-    content_time = int(content_time)
-    if last_block != {} and previous_hash != last_block['hash']:
-        return False
-
-    if (last_block['timestamp'] if 'timestamp' in last_block else 0) > content_time:
-        print('timestamp younger than previous block')
-        return False
-
-    if block_no >= 291500 and (last_block['timestamp'] if 'timestamp' in last_block else 0) == content_time:
-        print('timestamp younger than previous block')
-        return False
-
-    if content_time > timestamp():
-        print('timestamp in the future')
-        return False
-
-    database: Database = Database.instance
-    transactions = [tx for tx in transactions if isinstance(tx, Transaction)]
-    if get_transactions_size(transactions) > MAX_BLOCK_SIZE_HEX:
-        print('block is too big')
-        return False
-
-    if transactions:
-        check_inputs = sum([[(tx_input.tx_hash, tx_input.index) for tx_input in transaction.inputs] for transaction in transactions], [])
+        
+        database = Database.instance
         unspent_outputs = await database.get_unspent_outputs(check_inputs)
-        if len(set(check_inputs)) != len(check_inputs) or set(check_inputs) - set(unspent_outputs) != set():
-            print('double spend in block')
-            spent_outputs = set(check_inputs) - set(unspent_outputs)
-            print(len(spent_outputs))
+        if set(check_inputs) != set(unspent_outputs):
+            print(f"Block {block_no} attempts to spend an already-spent or non-existent output.")
             return False
-        input_txs_hash = sum([[tx_input.tx_hash for tx_input in transaction.inputs] for transaction in transactions], [])
-        input_txs = await database.get_transactions_info(input_txs_hash)
-        # move after pp('after get_transactions', time.time() - t)
-        for transaction in transactions:
-            await transaction._fill_transaction_inputs(input_txs)
 
-    for transaction in transactions:
+    for transaction in regular_transactions:
         if not await transaction.verify(check_double_spend=False):
-            print(f'transaction {transaction.hash()} has been not verified')
+            print(f"Block {block_no} contains an invalid transaction: {transaction.hash()}")
             return False
 
-    transactions_merkle_tree = get_transactions_merkle_tree(
-        transactions) if block_no >= 22500 else get_transactions_merkle_tree_ordered(transactions)
-    if merkle_tree != transactions_merkle_tree:
-        if block_no == 17972 and get_transactions_merkle_tree(transactions) == 'cb52390983d1902bf7d0eb96ed3f8adc359d34b6617dcccd2b610349e0ee8d15':
-            return True
-        if block_no == 143361 and transactions_merkle_tree == 'a9a930d5144c70afc1679dbb83551a318d5d5da6744145761962157a48fabd54':
-            return True
-        _print('merkle tree does not match')
+    expected_merkle_root = get_transactions_merkle_tree(regular_transactions)
+    if merkle_tree != expected_merkle_root:
+        print(f"Block {block_no} Merkle root does not match. Expected: {expected_merkle_root}, Got: {merkle_tree}")
         return False
 
+    print(f"Block {block_no} passed all checks.")
     return True
-
 
 async def create_block(block_content: str, transactions: List[Transaction], last_block: dict = None):
     Manager.difficulty = None
-    if last_block is None or last_block['id'] % BLOCKS_COUNT == 0:
-        difficulty, last_block = await calculate_difficulty()
-    else:
-        # fixme temp fix
-        difficulty, last_block = await get_difficulty()
-        #difficulty = Decimal(str(last_block['difficulty']))
-    if not await check_block(block_content, transactions, (difficulty, last_block)):
+    difficulty, last_block_from_db = await calculate_difficulty()
+    mining_info = (difficulty, last_block_from_db)
+
+    if not await check_block(block_content, transactions, mining_info=mining_info):
         return False
 
-    database: Database = Database.instance
-    block_no = last_block['id'] + 1 if last_block != {} else 1
-    block_hash = sha256(block_content) if block_no != 17972 else '37cb1a0522c039330775e07d824c94e0422dbfb2dba6dcd421f4dc9f11601672'
+    regular_transactions = [tx for tx in transactions if isinstance(tx, Transaction) and not isinstance(tx, CoinbaseTransaction)]
+
+    database = Database.instance
+    block_no = last_block_from_db.get('id', 0) + 1
+    block_hash = sha256(block_content)
+    
     previous_hash, address, merkle_tree, content_time, content_difficulty, random = split_block_content(block_content)
-    if block_hash == 'a53268dd22d173dd0c9c10d7f6a64f46071c669052186a7855e9cc65e9a46939':  # block 143361 has a double spend
-        for transaction in transactions:
-            if transaction.hash() == '5958b48fa0b1692b112affc7a2be887d24073027f3bef585322f33b5eeca463c':
-                transactions.remove(transaction)  # there are 2 transactions which spend same inputs in this block
-                break
-    fees = sum(transaction.fees for transaction in transactions)
-
+    
+    fees = sum(tx.fees for tx in regular_transactions)
     block_reward = get_block_reward(block_no)
+    
     coinbase_transaction = CoinbaseTransaction(block_hash, address, block_reward + fees)
-    if block_no > 35000:
-        if not coinbase_transaction.outputs[0].verify():
-            return False
-
-    await database.add_block(block_no, block_hash, block_content, address, random, difficulty, block_reward + fees, content_time)
-    await database.add_transaction(coinbase_transaction, block_hash)
+    
+    if not coinbase_transaction.outputs[0].verify():
+        return False
 
     try:
-        await database.add_transactions(transactions, block_hash)
-        if len(transactions) > 1 and block_no < 22500:
-            OLD_BLOCKS_TRANSACTIONS_ORDER.set(block_hash, [transaction.hex() for transaction in transactions])
+        await database.add_block(block_no, block_hash, block_content, address, random, content_difficulty, block_reward + fees, content_time)
+        await database.add_transaction(coinbase_transaction, block_hash)
+        
+        if regular_transactions:
+            await database.add_transactions(regular_transactions, block_hash)
+
+        await database.add_unspent_transactions_outputs(regular_transactions + [coinbase_transaction])
+        
+        if regular_transactions:
+            await database.remove_pending_transactions_by_hash([tx.hash() for tx in regular_transactions])
+            await database.remove_unspent_outputs(regular_transactions)
+            await database.remove_pending_spent_outputs(regular_transactions)
+
     except Exception as e:
-        print(f'a transaction has not been added in block', e)
+        print(f'FATAL: Could not commit block {block_no} to database. Rolling back. Error: {e}')
         await database.delete_block(block_no)
         return False
-    await database.add_unspent_transactions_outputs(transactions + [coinbase_transaction])
-    if transactions:
-        await database.remove_pending_transactions_by_hash([transaction.hash() for transaction in transactions])
-        await database.remove_unspent_outputs(transactions)
-        await database.remove_pending_spent_outputs(transactions)
 
-        _print(f'Added {len(transactions)} transactions in block {block_no}. Reward: {block_reward}, Fees: {fees}')
+    print(f'Added block {block_no} with {len(regular_transactions)} transactions. Reward: {block_reward}, Fees: {fees}')
     Manager.difficulty = None
     return True
-
 
 class Manager:
     difficulty: Tuple[float, dict] = None

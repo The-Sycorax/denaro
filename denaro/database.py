@@ -13,7 +13,7 @@ from .helpers import sha256, point_to_string, string_to_point, point_to_bytes, A
 from .transactions import Transaction, CoinbaseTransaction, TransactionInput
 
 dir_path = os.path.dirname(os.path.realpath(__file__))
-OLD_BLOCKS_TRANSACTIONS_ORDER = pickledb.load(dir_path + '/old_block_transactions_order.json', True)
+#OLD_BLOCKS_TRANSACTIONS_ORDER = pickledb.load(dir_path + '/old_block_transactions_order.json', True)
 
 
 class Database:
@@ -371,7 +371,7 @@ class Database:
         for block in blocks:
             block = normalize_block(block)
             block_hash = block['hash']
-            txs = OLD_BLOCKS_TRANSACTIONS_ORDER.get(block_hash) or index[block_hash]
+            txs = index[block_hash] #OLD_BLOCKS_TRANSACTIONS_ORDER.get(block_hash) or index[block_hash]
             size += sum(len(tx) for tx in txs)
             if size > MAX_BLOCK_SIZE_HEX * 8:
                 break
@@ -550,7 +550,7 @@ class Database:
         return unspent_outputs, spent_outputs
 
     async def get_nice_transaction(self, tx_hash: str, address: str = None):
-        print("Running get_nice_transaction")
+        #print("Running get_nice_transaction")
         async with self.pool.acquire() as connection:
             execution_timstamp_in_pending_txs = await connection.fetch("SELECT column_name FROM information_schema.columns WHERE table_name='pending_transactions' AND column_name='time_received';")            
             if not execution_timstamp_in_pending_txs:
@@ -621,3 +621,25 @@ class Database:
                 })         
         transaction['outputs'] = [{'address': output.address, 'amount': output.amount} for output in tx.outputs]
         return transaction
+
+    async def get_all_pending_transaction_hashes(self) -> List[str]:
+        """
+        Fetches the hashes of all transactions currently in the pending pool (mempool).
+        This is a lightweight query used for mempool synchronization.
+        """
+        async with self.pool.acquire() as connection:
+            records = await connection.fetch("SELECT tx_hash FROM pending_transactions")
+            return [record['tx_hash'] for record in records]
+
+    async def get_pending_transaction_count(self) -> int:
+        """Returns the total number of transactions in the pending pool."""
+        async with self.pool.acquire() as connection:
+            count = await connection.fetchval('SELECT count(*) FROM pending_transactions')
+        return count if count is not None else 0
+
+    async def remove_all_pending_transactions(self):
+        """Truncates the entire pending_transactions table for a clean start."""
+        async with self.pool.acquire() as connection:
+            # TRUNCATE is faster than DELETE for clearing an entire table.
+            # RESTART IDENTITY resets any auto-incrementing counters if they exist.
+            await connection.execute('TRUNCATE pending_transactions, pending_spent_outputs RESTART IDENTITY')

@@ -378,7 +378,7 @@ set_env_variables() {
     [[ " ${missing_vars[*]} " =~ " DENARO_DATABASE_HOST " ]] && update_variable "Enter database host" "DENARO_DATABASE_HOST" $update_missing_vars $show_current_vars
     [[ " ${missing_vars[*]} " =~ " DENARO_NODE_HOST " ]] && update_variable "Enter local Denaro node address or hostname" "DENARO_NODE_HOST" $update_missing_vars $show_current_vars
     [[ " ${missing_vars[*]} " =~ " DENARO_NODE_PORT " ]] && update_variable "Enter local Denaro node port" "DENARO_NODE_PORT" $update_missing_vars $show_current_vars
-    [[ " ${missing_vars[*]} " =~ " MAIN_DENARO_NODE " ]] && update_variable "Enter the url of a main Denaro node to sync with" "MAIN_DENARO_NODE" $update_missing_vars $show_current_vars
+    [[ " ${missing_vars[*]} " =~ " MAIN_DENARO_NODE " ]] && update_variable "Enter the address of a main Denaro node to sync with" "MAIN_DENARO_NODE" $update_missing_vars $show_current_vars
 
     local new_db_user=$(read_env_variable "DENARO_DATABASE_USER" | sha256sum | cut -d' ' -f1)
     local new_db_pass=$(read_env_variable "DENARO_DATABASE_PASSWORD" | sha256sum | cut -d' ' -f1)
@@ -495,7 +495,7 @@ setup_database() {
     
         echo "Importing database schema from schema.sql..."
         # Import schema
-        PGPASSWORD=$DENARO_DATABASE_PASSWORD psql -U $DENARO_DATABASE_USER -d $DENARO_DATABASE_NAME -c "SET client_min_messages TO WARNING;" -f schema.sql >&/dev/null || { echo "Schema import failed"; exit 1; }
+        PGPASSWORD=$DENARO_DATABASE_PASSWORD psql -U $DENARO_DATABASE_USER -d $DENARO_DATABASE_NAME -c "SET client_min_messages TO WARNING;" -f denaro/schema.sql >&/dev/null || { echo "Schema import failed"; exit 1; }
         echo ""
         echo "Database setup complete!"
         echo ""
