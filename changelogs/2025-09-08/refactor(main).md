@@ -11,7 +11,7 @@
   
   - Several API endpoints have been replaced or split by trust level (peer vs. external client). A new security subsystem (caches, reputation, DNS protections, query cost accounting) underpins request handling and propagation. Startup and middleware flows have been simplified and made deterministic.
 
-  - Signed peer requests are verified in a consistent format and protected against replay (timestamp + nonce). Outbound calls pin DNS; reserved/loopback/link-local ranges are always rejected, and private IPs are rejected when the local node is public. Private nodes may contact private IPs on the same. 
+  - Signed peer requests are verified in a consistent format and protected against replay (timestamp + nonce). Outbound calls pin DNS; reserved/loopback/link-local ranges are always rejected, and private IPs are rejected when the local node is public. Private nodes may contact private IPs on the same network. 
   
   - Propagation runs under a global concurrency cap; expensive endpoints apply per-client query budgets. TTL caches reduce duplicate work. A global sync gate (`SyncStateManager`) ensures only one synchronization runs at a time.
 
@@ -388,7 +388,9 @@
 ---
 
 ### Other Changes:
-  - Added an `get_all_pending_transaction_hashes` funtion to `database.py`. This new function fetches the hashes of all transactions currently in the pending pool.
+  - Added `get_all_pending_transaction_hashes` to `database.py`. This function fetches the hashes of all transactions currently in the pending pool.
+  - Added `get_pending_transaction_count` to `database.py`. This function returns the total number of transactions in the pending pool. 
+  - Added `remove_all_pending_transactions` to `database.py`. This function truncates the entire `pending_transactions` table.
   - `get_blocks` fun in `database.py` no longer uses `OLD_BLOCKS_TRANSACTIONS_ORDER`.
   - Moved `schema.sql` to `denaro` sub-directory.
   
