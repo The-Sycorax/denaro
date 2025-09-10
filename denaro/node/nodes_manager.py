@@ -25,7 +25,7 @@ MAX_PEERS_COUNT = 200
 path = dirname(os.path.realpath(__file__)) + '/nodes.json'
 config = dotenv_values(".env")
 
-MAIN_DENARO_NODE_URL = config.get("MAIN_DENARO_NODE", "https://denaro-node.gaetano.eu.org")
+DENARO_BOOTSTRAP_NODE_URL = config.get("DENARO_BOOTSTRAP_NODE", "https://denaro-node.gaetano.eu.org")
 SELF_URL = config.get("DENARO_SELF_URL")
 
 class NodesManager:

@@ -779,7 +779,7 @@ self_node_id: str = None
 config = dotenv_values(".env")
 self_url = config.get("DENARO_SELF_URL") 
 self_is_public: bool = False 
-MAIN_DENARO_NODE_URL = config.get("MAIN_DENARO_NODE")
+DENARO_BOOTSTRAP_NODE_URL = config.get("DENARO_BOOTSTRAP_NODE")
 
 # Initialize security components
 security = SecureNodeComponents()
@@ -1236,7 +1236,7 @@ async def periodic_peer_discovery():
     This version is now resilient to unreachable peers.
     """
     await asyncio.sleep(20)
-    await do_handshake_with_peer(MAIN_DENARO_NODE_URL)
+    await do_handshake_with_peer(DENARO_BOOTSTRAP_NODE_URL)
 
     while True:
         await asyncio.sleep(60)
@@ -1244,7 +1244,7 @@ async def periodic_peer_discovery():
         
         if not NodesManager.peers:
             print("Peer list is empty. Retrying handshake with bootstrap node.")
-            await do_handshake_with_peer(MAIN_DENARO_NODE_URL)
+            await do_handshake_with_peer(DENARO_BOOTSTRAP_NODE_URL)
             continue
 
         connectable_peers_tuples = [
@@ -1318,7 +1318,7 @@ async def check_own_reachability():
         return
 
     print(f"Potential public URL is {self_url}. Asking bootstrap node to verify...")
-    bootstrap_interface = NodeInterface(MAIN_DENARO_NODE_URL, client=http_client, db=db)
+    bootstrap_interface = NodeInterface(DENARO_BOOTSTRAP_NODE_URL, client=http_client, db=db)
     
     try:
         is_reachable = await bootstrap_interface.check_peer_reachability(self_url)
@@ -1336,7 +1336,7 @@ async def check_own_reachability():
         # The bootstrap node is unreachable. We can't verify, so we must assume we are private.
         self_is_public = False
         NodesManager.set_public_status(False)
-        print(f"Bootstrap node at {MAIN_DENARO_NODE_URL} is unreachable. Assuming this is a private node.")
+        print(f"Bootstrap node at {DENARO_BOOTSTRAP_NODE_URL} is unreachable. Assuming this is a private node.")
     
     except Exception as e:
         self_is_public = False
