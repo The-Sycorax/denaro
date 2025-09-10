@@ -391,6 +391,6 @@
   - Added `get_all_pending_transaction_hashes` to `database.py`. This function fetches the hashes of all transactions currently in the pending pool.
   - Added `get_pending_transaction_count` to `database.py`. This function returns the total number of transactions in the pending pool. 
   - Added `remove_all_pending_transactions` to `database.py`. This function truncates the entire `pending_transactions` table.
-  - `get_blocks` fun in `database.py` no longer uses `OLD_BLOCKS_TRANSACTIONS_ORDER`.
+  - The `get_blocks` function in `database.py` no longer uses `OLD_BLOCKS_TRANSACTIONS_ORDER`.
   - Moved `schema.sql` to `denaro` sub-directory.
   
