@@ -1680,8 +1680,8 @@ async def startup():
     self_node_id = get_node_id()
     NodesManager.init(self_node_id)
     
-    db_user = config.get('DENARO_DATABASE_USER', "denaro")
-    db_password = config.get('DENARO_DATABASE_PASSWORD', 'denaro')
+    db_user = config.get('POSTGRES_USER', "denaro")
+    db_password = config.get('POSTGRES_PASSWORD', 'denaro')
     db_name = config.get('DENARO_DATABASE_NAME', "denaro")
     db_host = config.get('DENARO_DATABASE_HOST')
     db = await Database.create(user=db_user, password=db_password, database=db_name, host=db_host)

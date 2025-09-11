@@ -12,4 +12,5 @@ nodes.json
 .postgres-env
 node_key.priv
 denaro/node/node_key.priv
+testing_framework/node_key.priv
 testing

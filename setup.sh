@@ -30,8 +30,8 @@ echo "Starting Denaro node setup..."
 echo ""
 
 # Global variables DB and host config
-DENARO_DATABASE_USER="denaro"
-DENARO_DATABASE_PASSWORD="denaro"
+POSTGRES_USER="denaro"
+POSTGRES_PASSWORD="denaro"
 DENARO_DATABASE_NAME="denaro"
 DENARO_DATABASE_HOST="127.0.0.1"
 DENARO_NODE_HOST="127.0.0.1"
@@ -173,7 +173,7 @@ load_env_variables() {
     if [[ -f "$env_file" ]]; then
         #echo "Loading existing configurations..."
         while IFS='=' read -r key value; do
-            if [[ $key == DENARO_DATABASE_USER || $key == DENARO_DATABASE_PASSWORD || $key == DENARO_DATABASE_NAME || $key == DENARO_DATABASE_HOST || $key == DENARO_NODE_HOST || $key == DENARO_NODE_PORT || $key == DENARO_SELF_URL || $key == DENARO_BOOTSTRAP_NODE ]]; then
+            if [[ $key == POSTGRES_USER || $key == POSTGRES_PASSWORD || $key == DENARO_DATABASE_NAME || $key == DENARO_DATABASE_HOST || $key == DENARO_NODE_HOST || $key == DENARO_NODE_PORT || $key == DENARO_SELF_URL || $key == DENARO_BOOTSTRAP_NODE ]]; then
                 eval $key="'$value'"
             fi
         done < "$env_file"
@@ -192,8 +192,8 @@ identify_missing_variables() {
     local missing_vars=()
 
     # Check each variable to see if it's present and has a value
-    grep -qE "^DENARO_DATABASE_USER=.+" "$env_file" || missing_vars+=("DENARO_DATABASE_USER")
-    grep -qE "^DENARO_DATABASE_PASSWORD=.+" "$env_file" || missing_vars+=("DENARO_DATABASE_PASSWORD")
+    grep -qE "^POSTGRES_USER=.+" "$env_file" || missing_vars+=("POSTGRES_USER")
+    grep -qE "^POSTGRES_PASSWORD=.+" "$env_file" || missing_vars+=("POSTGRES_PASSWORD")
     grep -qE "^DENARO_DATABASE_NAME=.+" "$env_file" || missing_vars+=("DENARO_DATABASE_NAME")
     grep -qE "^DENARO_DATABASE_HOST=.+" "$env_file" || missing_vars+=("DENARO_DATABASE_HOST")
     grep -qE "^DENARO_NODE_HOST=.+" "$env_file" || missing_vars+=("DENARO_NODE_HOST")
@@ -227,17 +227,17 @@ update_variable() {
     fi
 
     if ! $SKIP_PROMPTS && ! $USE_DEFAULT_ENV_VARS; then
-        if [[ "$var_name" == "DENARO_DATABASE_PASSWORD" ]]; then
+        if [[ "$var_name" == "POSTGRES_PASSWORD" ]]; then
             while true; do
                 # Special handling for password input with asterisks feedback
                 read_password_with_asterisks "$prompt:" "$var_name"
-                local password_value_1=$(echo $DENARO_DATABASE_PASSWORD | sha256sum | cut -d' ' -f1)
-                if [[ -z $DENARO_DATABASE_PASSWORD ]]; then
+                local password_value_1=$(echo $POSTGRES_PASSWORD | sha256sum | cut -d' ' -f1)
+                if [[ -z $POSTGRES_PASSWORD ]]; then
                     echo "Password can not be empty, please try again."
                     echo ""
                 else
                     read_password_with_asterisks "Confirm database password:" "$var_name" $show_current_vars
-                    local password_value_2=$(echo $DENARO_DATABASE_PASSWORD | sha256sum | cut -d' ' -f1)
+                    local password_value_2=$(echo $POSTGRES_PASSWORD | sha256sum | cut -d' ' -f1)
                     if [[ "$password_value_1" != "$password_value_2" ]]; then
                         echo "Passwords do not match, please try again."
                         echo ""
@@ -310,7 +310,7 @@ set_env_variables() {
                             local update_missing_vars=true
                             local show_current_vars=true
                             PROMPT_FOR_DEFAUT=false
-                            missing_vars=("DENARO_DATABASE_USER" "DENARO_DATABASE_PASSWORD" "DENARO_DATABASE_NAME" "DENARO_DATABASE_HOST" "DENARO_NODE_HOST" "DENARO_NODE_PORT" "DENARO_SELF_URL "DENARO_BOOTSTRAP_NODE"")
+                            missing_vars=("POSTGRES_USER" "POSTGRES_PASSWORD" "DENARO_DATABASE_NAME" "DENARO_DATABASE_HOST" "DENARO_NODE_HOST" "DENARO_NODE_PORT" "DENARO_SELF_URL "DENARO_BOOTSTRAP_NODE"")
                             echo "Leave blank to keep the current value."
                             echo ""
                             break;;
@@ -369,13 +369,13 @@ set_env_variables() {
         echo "Using default values for configuration."
     fi
     
-    local initial_db_user=$(read_env_variable "DENARO_DATABASE_USER" | sha256sum | cut -d' ' -f1)
-    local initial_db_pass=$(read_env_variable "DENARO_DATABASE_PASSWORD" | sha256sum | cut -d' ' -f1)
+    local initial_db_user=$(read_env_variable "POSTGRES_USER" | sha256sum | cut -d' ' -f1)
+    local initial_db_pass=$(read_env_variable "POSTGRES_PASSWORD" | sha256sum | cut -d' ' -f1)
     local initial_db_name=$(read_env_variable "DENARO_DATABASE_NAME" | sha256sum | cut -d' ' -f1)
    
     # Use the update_variable function for each required variable based on its presence in missing_vars array
-    [[ " ${missing_vars[*]} " =~ " DENARO_DATABASE_USER " ]] && update_variable "Enter database username" "DENARO_DATABASE_USER" $update_missing_vars $show_current_vars
-    [[ " ${missing_vars[*]} " =~ " DENARO_DATABASE_PASSWORD " ]] && update_variable "Enter password for database user" "DENARO_DATABASE_PASSWORD" $update_missing_vars $show_current_vars
+    [[ " ${missing_vars[*]} " =~ " POSTGRES_USER " ]] && update_variable "Enter database username" "POSTGRES_USER" $update_missing_vars $show_current_vars
+    [[ " ${missing_vars[*]} " =~ " POSTGRES_PASSWORD " ]] && update_variable "Enter password for database user" "POSTGRES_PASSWORD" $update_missing_vars $show_current_vars
     [[ " ${missing_vars[*]} " =~ " DENARO_DATABASE_NAME " ]] && update_variable "Enter database name" "DENARO_DATABASE_NAME" $update_missing_vars $show_current_vars
     [[ " ${missing_vars[*]} " =~ " DENARO_DATABASE_HOST " ]] && update_variable "Enter database host" "DENARO_DATABASE_HOST" $update_missing_vars $show_current_vars
     [[ " ${missing_vars[*]} " =~ " DENARO_NODE_HOST " ]] && update_variable "Enter local Denaro node address or hostname" "DENARO_NODE_HOST" $update_missing_vars $show_current_vars
@@ -383,8 +383,8 @@ set_env_variables() {
     [[ " ${missing_vars[*]} " =~ " DENARO_SELF_URL " ]] && update_variable "Enter the public URL of this Denaro node (e.g., https://yourdomain.com). Leave blank if the node is private" "DENARO_SELF_URL" $update_missing_vars $show_current_vars
     [[ " ${missing_vars[*]} " =~ " DENARO_BOOTSTRAP_NODE " ]] && update_variable "Enter the address of a main Denaro node to sync with" "DENARO_BOOTSTRAP_NODE" $update_missing_vars $show_current_vars
 
-    local new_db_user=$(read_env_variable "DENARO_DATABASE_USER" | sha256sum | cut -d' ' -f1)
-    local new_db_pass=$(read_env_variable "DENARO_DATABASE_PASSWORD" | sha256sum | cut -d' ' -f1)
+    local new_db_user=$(read_env_variable "POSTGRES_USER" | sha256sum | cut -d' ' -f1)
+    local new_db_pass=$(read_env_variable "POSTGRES_PASSWORD" | sha256sum | cut -d' ' -f1)
     local new_db_name=$(read_env_variable "DENARO_DATABASE_NAME" | sha256sum | cut -d' ' -f1)
     
     [[ "$initial_db_user" != "$new_db_user" ]] && db_user_changed=true
@@ -419,25 +419,25 @@ setup_database() {
     
     echo "Checking if the database user exists..."
     # Check if user exists
-    if ! sudo -u postgres psql -tAc "SELECT 1 FROM pg_roles WHERE rolname='$DENARO_DATABASE_USER'" | grep -q 1; then
-        echo "Creating user $DENARO_DATABASE_USER..."
-        sudo -u postgres psql -c "CREATE USER $DENARO_DATABASE_USER;" >&/dev/null || { echo "User creation failed"; exit 1; }
+    if ! sudo -u postgres psql -tAc "SELECT 1 FROM pg_roles WHERE rolname='$POSTGRES_USER'" | grep -q 1; then
+        echo "Creating user $POSTGRES_USER..."
+        sudo -u postgres psql -c "CREATE USER $POSTGRES_USER;" >&/dev/null || { echo "User creation failed"; exit 1; }
         db_modified=true
     else
-        echo "Database user '$DENARO_DATABASE_USER' already exists, skipping..."
+        echo "Database user '$POSTGRES_USER' already exists, skipping..."
     fi
     echo ""
     
     echo "Checking if password is set for database user..."
-    has_password=$(sudo -u postgres psql -X -A -t -c "SELECT rolpassword IS NULL FROM pg_authid WHERE rolname = '$DENARO_DATABASE_USER';")
+    has_password=$(sudo -u postgres psql -X -A -t -c "SELECT rolpassword IS NULL FROM pg_authid WHERE rolname = '$POSTGRES_USER';")
     if [ ! "$has_password" = "f" ]; then
         echo "Setting password for database user..."
-        sudo -u postgres psql -c "ALTER USER $DENARO_DATABASE_USER WITH PASSWORD '$DENARO_DATABASE_PASSWORD';" >&/dev/null || { echo "Setting password failed"; exit 1; }
+        sudo -u postgres psql -c "ALTER USER $POSTGRES_USER WITH PASSWORD '$POSTGRES_PASSWORD';" >&/dev/null || { echo "Setting password failed"; exit 1; }
         db_modified=true
         echo "Password set."
     else
         if $db_pass_changed; then
-            sudo -u postgres psql -c "ALTER USER $DENARO_DATABASE_USER WITH PASSWORD '$DENARO_DATABASE_PASSWORD';" >&/dev/null || { echo "Setting password failed"; exit 1; }
+            sudo -u postgres psql -c "ALTER USER $POSTGRES_USER WITH PASSWORD '$POSTGRES_PASSWORD';" >&/dev/null || { echo "Setting password failed"; exit 1; }
             echo "Password set."
         else
             echo "Password already set for database user, skipping..."
@@ -447,12 +447,12 @@ setup_database() {
     
     # Check if user already has all privileges on the database
     echo "Checking if user has all database privileges..."
-    has_CTc_priv=$(sudo -u postgres psql -X -A -t -c "SELECT bool_or(datacl::text LIKE '%$DENARO_DATABASE_USER=CTc%') FROM pg_database WHERE datname = '$DENARO_DATABASE_NAME';")
+    has_CTc_priv=$(sudo -u postgres psql -X -A -t -c "SELECT bool_or(datacl::text LIKE '%$POSTGRES_USER=CTc%') FROM pg_database WHERE datname = '$DENARO_DATABASE_NAME';")
     if [ ! "$has_CTc_priv" = "t" ]; then
         echo "Granting all database privileges to user..."
-        sudo -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE $DENARO_DATABASE_NAME TO $DENARO_DATABASE_USER;" >&/dev/null || { echo "Granting privileges failed"; exit 1; }
-        sudo -u postgres psql -d $DENARO_DATABASE_NAME -c "GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO $DENARO_DATABASE_USER;" >&/dev/null || { echo "Granting privileges failed"; exit 1; }
-        sudo -u postgres psql -d $DENARO_DATABASE_NAME -c "GRANT ALL ON SCHEMA public TO $DENARO_DATABASE_USER;" >&/dev/null || { echo "Granting privileges failed"; exit 1; }
+        sudo -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE $DENARO_DATABASE_NAME TO $POSTGRES_USER;" >&/dev/null || { echo "Granting privileges failed"; exit 1; }
+        sudo -u postgres psql -d $DENARO_DATABASE_NAME -c "GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO $POSTGRES_USER;" >&/dev/null || { echo "Granting privileges failed"; exit 1; }
+        sudo -u postgres psql -d $DENARO_DATABASE_NAME -c "GRANT ALL ON SCHEMA public TO $POSTGRES_USER;" >&/dev/null || { echo "Granting privileges failed"; exit 1; }
         db_modified=true
         echo "Privileges granted."
     else
@@ -461,15 +461,15 @@ setup_database() {
     echo ""
     
     # Check if the database owner is already set to the specified user
-    echo "Checking if database owner is already '$DENARO_DATABASE_USER'..."
+    echo "Checking if database owner is already '$POSTGRES_USER'..."
     CURRENT_OWNER=$(sudo -u postgres psql -tAc "SELECT d.datname, pg_catalog.pg_get_userbyid(d.datdba) as owner FROM pg_catalog.pg_database d WHERE d.datname = '$DENARO_DATABASE_NAME'")
-    if [[ $CURRENT_OWNER != *"$DENARO_DATABASE_USER"* ]]; then
-        echo "Setting database owner to '$DENARO_DATABASE_USER'..."
-        sudo -u postgres psql -c "ALTER DATABASE $DENARO_DATABASE_NAME OWNER TO $DENARO_DATABASE_USER;" >&/dev/null || { echo "Setting database owner failed"; exit 1; }
+    if [[ $CURRENT_OWNER != *"$POSTGRES_USER"* ]]; then
+        echo "Setting database owner to '$POSTGRES_USER'..."
+        sudo -u postgres psql -c "ALTER DATABASE $DENARO_DATABASE_NAME OWNER TO $POSTGRES_USER;" >&/dev/null || { echo "Setting database owner failed"; exit 1; }
         db_modified=true
         echo "Database owner set."
     else
-        echo "Database owner is already '$DENARO_DATABASE_USER'."
+        echo "Database owner is already '$POSTGRES_USER'."
     fi
     echo ""
     
@@ -498,7 +498,7 @@ setup_database() {
     
         echo "Importing database schema from schema.sql..."
         # Import schema
-        PGPASSWORD=$DENARO_DATABASE_PASSWORD psql -U $DENARO_DATABASE_USER -d $DENARO_DATABASE_NAME -c "SET client_min_messages TO WARNING;" -f denaro/schema.sql >&/dev/null || { echo "Schema import failed"; exit 1; }
+        PGPASSWORD=$POSTGRES_PASSWORD psql -U $POSTGRES_USER -d $DENARO_DATABASE_NAME -c "SET client_min_messages TO WARNING;" -f denaro/schema.sql >&/dev/null || { echo "Schema import failed"; exit 1; }
         echo ""
         echo "Database setup complete!"
         echo ""
