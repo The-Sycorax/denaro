@@ -2,6 +2,8 @@
 
 **Contributor**: The-Sycorax (https://github.com/The-Sycorax)
 
+**Commit**: [563deca4b8c0acfcca16c45eaf46a2271e0182a5](https://github.com/The-Sycorax/denaro/commit/563deca4b8c0acfcca16c45eaf46a2271e0182a5)
+
 **Date**: September 10th, 2025
 
 ---
