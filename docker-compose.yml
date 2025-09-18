@@ -1,48 +1,48 @@
-version: "3.8"
+version: '3.8'
+
+# All nodes share these settings and environment variables
+# Individual nodes can override them as needed
+x-denaro-node-base: &denaro-node-base
+  build: .
+  restart: unless-stopped
+  working_dir: /app
+  env_file: [.env]
+  labels: ["denaro.node=true"]
+  networks: [denaro-net]
+  volumes:
+    - type: volume
+      target: /app
+    - type: volume
+      source: node-registry
+      target: /registry
+  environment:
+    &denaro-node-env
+    DENARO_DATABASE_HOST: 'postgres'
+    DENARO_NODE_HOST: '0.0.0.0'
 
 services:
+  postgres:
+    image: postgres:14
+    env_file: [.env]
+    volumes: [postgres_data:/var/lib/postgresql/data]
+    networks: [denaro-net]
 
-  denaro-node:
-    build:
-      context: ./
-      dockerfile: ./Dockerfile
-    image: denaro/denaro:0.2.0
-    container_name: denaro-node
+  node-3006:
+    <<: *denaro-node-base
+    hostname: node-3006
+    volumes: [node_3006_data:/app, node-registry:/registry]
+    depends_on: [postgres]
     environment:
-      DENARO_DATABASE_USER: "user"
-      DENARO_DATABASE_PASSWORD: "password"
-      DENARO_DATABASE_NAME: "denaro"
-      DENARO_DATABASE_HOST: "denaro-postgres"
-    tty: true
-    ports:
-      - 3006:3006
-    networks:
-      - denaro
+      <<: *denaro-node-env
+      NODE_NAME: 'node-3006'
+      DENARO_NODE_PORT: '3006'
+      DENARO_BOOTSTRAP_NODE: 'self'
 
-  denaro-postgres:
-    image: postgres:14.1-alpine3.15
-    container_name: denaro-postgres
-    environment:
-      POSTGRES_USER: "user"
-      POSTGRES_PASSWORD: "password"
-      POSTGRES_DB: "denaro"
-      POSTGRES_HOST: "denaro-postgres"
-    ports:
-      - "5432:5432"
-    volumes:
-      - ./postgres:/var/lib/postgresql
-      - ./schema.sql:/docker-entrypoint-initdb.d/create_tables.sql
-    networks:
-      - denaro
-
-  denaro-adminer:
-    image: adminer:4.8.1
-    container_name: denaro-adminer
-    ports:
-      - "8080:8080"
-    networks:
-      - denaro
+volumes:
+  node-registry:
+  node_3006_data:
+  postgres_data:
 
 networks:
-  denaro:
+  denaro-net:
     driver: bridge
