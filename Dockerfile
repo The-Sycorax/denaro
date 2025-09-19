@@ -10,7 +10,7 @@ ENV PYTHONUNBUFFERED 1
 # - openssh-client: for the Pinggy.io ssh tunnel command.
 # - wget: required for the HEALTHCHECK command.
 # - build-essential tools (gcc) and dev libraries (libgmp-dev, libpq-dev): for compiling Python packages.
-RUN apt-get update && apt-get upgrade && apt-get install -y wget libgmp-dev libpq-dev gcc openssh-client postgresql-client && rm -rf /var/lib/apt/lists/*
+RUN apt-get update -y && apt-get upgrade -y && apt-get install -y wget libgmp-dev libpq-dev gcc openssh-client postgresql-client && rm -rf /var/lib/apt/lists/*
 
 
 # Set the working directory inside the container

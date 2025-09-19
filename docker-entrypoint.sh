@@ -1,5 +1,4 @@
 #!/bin/bash
-set -e
 
 ###############################################################################
 # Denaro Node Container Entrypoint
@@ -63,17 +62,19 @@ set -e
 #
 ###############################################################################
 
+set -e
+
 echo "--- Denaro Node Container Entrypoint for ${NODE_NAME} ---"
 
 # --- CONFIGURATION ---
-REGISTRY_DIR="/registry"
-REGISTRY_FILE="${REGISTRY_DIR}/public_nodes.txt"
-mkdir -p "$REGISTRY_DIR"
+REGISTRY_DIR="/registry"                                      # Shared registry directory
+REGISTRY_FILE="${REGISTRY_DIR}/public_nodes.txt"              # Shared peer registry file
+mkdir -p "$REGISTRY_DIR"                                      # Ensure registry directory exists
 
-SANITIZED_NODE_NAME=$(echo "${NODE_NAME}" | tr '-' '_')
-DB_NAME="denaro_${SANITIZED_NODE_NAME}"
+SANITIZED_NODE_NAME=$(echo "${NODE_NAME}" | tr '-' '_')       # Replace hyphens with underscores for DB naming
+DB_NAME="denaro_${SANITIZED_NODE_NAME}"                       # Per-node database name
 
-# Set a default internal URL, used as a safe baseline and as a fallback
+# Set a default internal URL used as a safe baseline and as a fallback
 export DENARO_SELF_URL="http://${NODE_NAME}:${DENARO_NODE_PORT}"
 
 # Normalize bootstrap intent default if unset
@@ -81,26 +82,25 @@ if [ -z "${DENARO_BOOTSTRAP_NODE}" ]; then
   export DENARO_BOOTSTRAP_NODE="self"
 fi
 
-# --- STAGE 1: GET AND PUBLISH OWN URL WHEN TUNNELING IS ENABLED ---
-# If tunneling is requested, try to capture the public URL. If this fails,
-# do not exit. Fall back to internal URL and disable tunneling for later stages.
+# --- STAGE 1: OPTIONAL PUBLIC TUNNEL VIA PINGGY ---
+# If tunneling is requested, attempt to capture a public URL. Failure falls back to internal URL.
 if [ "${ENABLE_PINGGY_TUNNEL}" = "true" ]; then
   echo "Pinggy tunnel enabled. Starting tunnel..."
-  # Launch tunnel in background. Suppress strict host checks for ephemeral endpoints.
+  # Launch the tunnel in the background. Suppress strict host checks due to ephemeral endpoints.
   ssh -n -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
       -p 443 -R0:localhost:${DENARO_NODE_PORT} free.pinggy.io > /tmp/pinggy.log 2>&1 &
 
   echo "Waiting for Pinggy to provide a public URL..."
   COUNTER=0
   PUBLIC_URL=""
-  # Up to 30 seconds for capture, scanning the log each second.
+  # Up to 30 seconds for capture, scanning the log each second
   while [ $COUNTER -lt 30 ]; do
-    # Extract the first matching https endpoint from pinggy output
+    # Extract the first matching https endpoint from Pinggy output
     PUBLIC_URL=$(grep -o 'https://[a-zA-Z0-9-]*\.a\.free\.pinggy\.link' /tmp/pinggy.log | head -n 1 || true)
     if [ -n "$PUBLIC_URL" ]; then
       echo "SUCCESS: Captured public URL: ${PUBLIC_URL}"
-      export DENARO_SELF_URL="${PUBLIC_URL}"
-      echo "${PUBLIC_URL}" >> "${REGISTRY_FILE}"
+      export DENARO_SELF_URL="${PUBLIC_URL}"                 # Promote captured public URL to self URL
+      echo "${PUBLIC_URL}" >> "${REGISTRY_FILE}"             # Publish to registry for peer discovery
       echo "Published public URL to registry."
       break
     fi
@@ -122,19 +122,18 @@ else
   echo "Pinggy tunnel not enabled. Using internal URL for self."
 fi
 
-# --- STAGE 2 AND 3: DISCOVER PEER URL WHEN NEEDED ---
-# This block handles both public bootstrap nodes discovering each other
-# and private nodes discovering a public bootstrap. All paths have fallbacks.
-if [ "${DENARO_BOOTSTRAP_NODE}" = "discover" ] || { [ "${ENABLE_PINGGY_TUNNEL}" = "true" ] && [ "${DENARO_BOOTSTRAP_NODE}" != "self" ]; }; then
-
-  # Determine how many URLs we expect to find
-  # Public bootstrap nodes expect a partner. Private nodes expect any public node.
+# --- STAGE 2 AND 3: BOOTSTRAP DISCOVERY WHEN REQUESTED ---
+# Discovery runs only when DENARO_BOOTSTRAP_NODE equals "discover".
+# If a fixed bootstrap address is provided, this entire block is skipped.
+if [ "${DENARO_BOOTSTRAP_NODE}" = "discover" ]; then
+  # Determine how many URLs to expect in the registry
+  # Public nodes that are discoverable wait for a partner. Private nodes wait for any public node.
   EXPECTED_URLS=1
   if [ "${ENABLE_PINGGY_TUNNEL}" = "true" ]; then
     EXPECTED_URLS=2
-    echo "This is a public bootstrap node. Waiting for another public node to register..."
+    echo "Discovery requested and tunneling enabled. Waiting for a second public node to register..."
   else
-    echo "This is a private node. Waiting for any public node to register..."
+    echo "Discovery requested. Waiting for any public node to register..."
   fi
 
   COUNTER=0
@@ -151,40 +150,23 @@ if [ "${DENARO_BOOTSTRAP_NODE}" = "discover" ] || { [ "${ENABLE_PINGGY_TUNNEL}" 
   # If registry is still short, apply fallback instead of exiting
   if [ "$(wc -l < "${REGISTRY_FILE}" 2>/dev/null || echo 0)" -lt "${EXPECTED_URLS}" ]; then
     echo "WARNING: Timed out waiting for enough public nodes to register."
-    # Fallback policy:
-    #  - If this node is a bootstrap node, point to self
-    #  - If this node is private with discover, point to self
-    # This allows the node to start in isolation and later gossip when peers appear.
-    if [ "${ENABLE_PINGGY_TUNNEL}" = "true" ]; then
-      echo "Applying fallback for public bootstrap: setting DENARO_BOOTSTRAP_NODE to self."
-      export DENARO_BOOTSTRAP_NODE="${DENARO_SELF_URL}"
-    else
-      if [ "${DENARO_BOOTSTRAP_NODE}" = "discover" ]; then
-        echo "Applying fallback for private node discovery: setting DENARO_BOOTSTRAP_NODE to self."
-        export DENARO_BOOTSTRAP_NODE="${DENARO_SELF_URL}"
-      fi
-    fi
+    # Fallback policy keeps the node operable and able to gossip later
+    export DENARO_BOOTSTRAP_NODE="${DENARO_SELF_URL}"
+    echo "Applying fallback for discovery: setting DENARO_BOOTSTRAP_NODE to self."
   else
-    # Registry has enough lines. Pick a peer that is not ourselves.
+    # Registry has enough lines. Pick a peer that is not ourselves
     OTHER_PUBLIC_URL=$(grep -v "${DENARO_SELF_URL}" "${REGISTRY_FILE}" | head -n 1 || true)
-
     if [ -n "${OTHER_PUBLIC_URL}" ]; then
       export DENARO_BOOTSTRAP_NODE="${OTHER_PUBLIC_URL}"
       echo "Discovered and selected bootstrap peer: ${DENARO_BOOTSTRAP_NODE}"
     else
-      # No different URL available
-      if [ "${DENARO_BOOTSTRAP_NODE}" = "discover" ]; then
-        echo "WARNING: Could not discover a different bootstrap peer URL. Falling back to self."
-        export DENARO_BOOTSTRAP_NODE="${DENARO_SELF_URL}"
-      else
-        echo "No other bootstrap peer found. Setting DENARO_BOOTSTRAP_NODE to self."
-        export DENARO_BOOTSTRAP_NODE="${DENARO_SELF_URL}"
-      fi
+      echo "WARNING: Could not discover a different bootstrap peer URL. Falling back to self."
+      export DENARO_BOOTSTRAP_NODE="${DENARO_SELF_URL}"
     fi
   fi
 fi
 
-# Final fallback for explicit or implicit self selection
+# Final resolution when the literal value is "self"
 if [ "${DENARO_BOOTSTRAP_NODE}" = "self" ]; then
   export DENARO_BOOTSTRAP_NODE="${DENARO_SELF_URL}"
 fi
@@ -206,16 +188,18 @@ echo "Generated .env file:"
 cat .env
 echo "----------------------------------------"
 
-# 2. Setup the database for this node
+# Database provisioning
 echo "Setting up database: ${DB_NAME}"
 export PGPASSWORD="${POSTGRES_PASSWORD}"
+
+# Wait until Postgres reports readiness
 until pg_isready -h postgres -U "${POSTGRES_USER}" > /dev/null 2>&1; do
   echo "Postgres is unavailable - sleeping"
   sleep 1
 done
 echo "PostgreSQL is ready."
 
-# Create DB if missing and import schema only on first creation
+# Create database if missing and import schema only on first creation
 if ! psql -h postgres -U "${POSTGRES_USER}" -d "postgres" -tc "SELECT 1 FROM pg_database WHERE datname = '${DB_NAME}'" | grep -q 1; then
   echo "Database '${DB_NAME}' does not exist. Creating..."
   psql -h postgres -U "${POSTGRES_USER}" -d "postgres" -c "CREATE DATABASE \"${DB_NAME}\""
@@ -224,8 +208,9 @@ if ! psql -h postgres -U "${POSTGRES_USER}" -d "postgres" -tc "SELECT 1 FROM pg_
 else
   echo "Database '${DB_NAME}' already exists."
 fi
+
 unset PGPASSWORD
 
-# 4. Launch the Denaro Node
+# Launch the Denaro Node
 echo "Starting Denaro node on 0.0.0.0:${DENARO_NODE_PORT}..."
 exec python run_node.py

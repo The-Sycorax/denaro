@@ -16,7 +16,7 @@
 
 - A new `docker-entrypoint.sh` script has been introduced to manage container lifecycle. The script orchestrates the container startup sequence, handles automated bootstrap-node discovery via a shared peer registry, generates the application `.env`, and provisions per-node databases.
 
-- To facilite public node behavior over the internet, the entrypoint script also includes optional support for exposing a node on the Internet by establishing an SSH reverse tunnel via [Pinggy.io's free tunnleing service](https://www.pinggy.io).
+- To facilitate public node behavior over the internet, the entrypoint script also includes optional support for exposing a node on the Internet by establishing an SSH reverse tunnel via [Pinggy.io's free tunnleing service](https://www.pinggy.io).
 
 ---
 
@@ -97,80 +97,82 @@
     
 ## Added Files:
 
-- #### **`docker-entrypoint.sh`**:
+#### `docker-entrypoint.sh`
 
-    Node startup inside the container is orchestrated by this entrypoint script. Runtime configuration is prepared, bootstrap-node discovery is performed using a shared peer registry, the node-specific PostgreSQL database and schema are provisioned on first run, and the node process is launched.
+Node startup inside the container is orchestrated by this entrypoint script. Runtime configuration is prepared, optional bootstrap discovery is performed using a shared peer registry, the node specific PostgreSQL database and schema are provisioned on first run, and the node process is launched.
+
+To facilitate public node behavior over the internet, the entrypoint script also includes optional support for exposing a node on the Internet by establishing an SSH reverse tunnel via [Pinggy.io's free tunnleing service](https://www.pinggy.io).
+
+The script is designed to proceed on recoverable issues by using conservative fallbacks when dependent actions fail. Unrecoverable errors such as database command failures still cause exit due to `set -e`.
+
+---
+
+### Execution flow:
+
+1. #### Initialization:
+   - The shared registry directory is created at `/registry`. The peer registry file is tracked at `/registry/public_nodes.txt`.
+   
+   - A PostgreSQL compatible database name `denaro_${SANITIZED_NODE_NAME}` is computed by replacing hyphens in `NODE_NAME` with underscores. 
+   
+      - This value is held in the shell as `DB_NAME` and is persisted into the generated `.env` as `DENARO_DATABASE_NAME`. It is not exported into the entrypoint process environment.
+   
+   - `DENARO_SELF_URL` is set to `http://${NODE_NAME}:${DENARO_NODE_PORT}` as a safe baseline and fallback.
+   
+   - Bootstrap intent is normalized. If `DENARO_BOOTSTRAP_NODE` is not provided, it is set to `'self'` by default.
+
+
+2. #### **Optional Public Node Tunnleing**:
+   - When **`ENABLE_PINGGY_TUNNEL`** is set to **`'true'`**:
+      - The script will establish an SSH reverse tunnel via Pinggy's free tunnleing service (`free.pinggy.io:443`) to expose the node on the Internet. This is intended for testing public node behavior over the Internet. 
       
-    To facilite public node behavior over the internet, the entrypoint script also includes optional support for exposing a node on the Internet by establishing an SSH reverse tunnel via [Pinggy.io's free tunnleing service](https://www.pinggy.io).
-
-    The script is designed to proceed on recoverable issues by using conservative fallbacks when dependent actions fail. Unrecoverable errors such as database command failures still cause exit due to `set -e`.
-
-  **Below is the script's execution flow**:
-
-  1. #### **Initialization**:
-      - The shared registry directory is created at `/registry`. The peer registry file is tracked at `/registry/public_nodes.txt`.
-  
-      - A PostgreSQL-compatible database name `denaro_${SANITIZED_NODE_NAME}` is derived by replacing hyphens in `NODE_NAME` with underscores. **`DENARO_DATABASE_NAME`** is then set to this value.
-       
-      - **`DENARO_SELF_URL`** is set to `http://${NODE_NAME}:${DENARO_NODE_PORT}`.
-       
-      - Bootstrap intent is normalized. If **`DENARO_BOOTSTRAP_NODE`** is not provided, it is set to **`'self'`** by default.
-  
-  2. #### **Optional Public Node Tunnleing**:
-      - When **`ENABLE_PINGGY_TUNNEL`** is set to **`'true'`**, the script will establish an SSH reverse tunnel via Pinggy's free tunnleing service (`free.pinggy.io:443`) to expose the node on the Internet. This is intended for testing public node behavior over the Internet. 
+      - SSH output is captured in `/tmp/pinggy.log`. The script scans this file for an assigned public URL for up to 30 seconds. If found, `DENARO_SELF_URL` is updated to that public URL and is appended to `/registry/public_nodes.txt` so that it can be discovered by other nodes within the same Docker environment. 
+        - Only public endpoints are registered. Private nodes do not add internal URLs to the registry.
       
-      - SSH output is saved to `/tmp/pinggy.log`. The script then parses this file to retrieve the assigned public URL, updates **`DENARO_SELF_URL`**, and appends it to `/registry/public_nodes.txt` for peer discovery. 
-        
-      - If a public URL is not retrieved, the script will fall back to using the node's internal URL and tunneling will be disabled.
+      - If no public URL is captured within the 30 second wait window, the script falls back to the internal URL, disables tunneling, and prints the tail of `/tmp/pinggy.log` for diagnostics.
 
-      *Note: Pinggy's free tunnleing service limits sessions to 60 minutes, after which the tunnel will be disconnected.*
-  
-  3. #### **Bootstrap-node Discovery and Selection**:
-      - If **`DENARO_BOOTSTRAP_NODE`** is set to **`'discover'`**:
-        -  The script waits for the peer registry to contain at least one node. When possible, it then selects a node with a URL that is not equal to the current node’s **`DENARO_SELF_URL`**.
-  
-        - If the node itself is public and discovery is requested, it waits for a second public node to appear so that a distinct one can be selected.
+   - *Note: Pinggy's free tunnleing service limits sessions to 60 minutes, after which the tunnel will be disconnected. There is no mechanism to re establish the tunnel after it drops.*
 
-        - Once a node has been selected, **`DENARO_BOOTSTRAP_NODE`** is then set to the URL of that node.
-       
-        - If the registry never reaches the expected count within the bounded wait window, or if only the current node is available, the script falls back to using **`DENARO_SELF_URL`** as the bootstrap-node.
-       
-      - If **`DENARO_BOOTSTRAP_NODE`** is set to **`'self'`**:
-          - The script explicitly resolves it to **`DENARO_SELF_URL`**.
-      
-      - If **`DENARO_BOOTSTRAP_NODE`** is set to a fixed address:
-        - Bootstrap-node discovery and selection is skipped.
+3. #### Bootstrap node discovery and selection:
+   - If `DENARO_BOOTSTRAP_NODE` is `discover`:
+     - The script waits for entries to appear in `/registry/public_nodes.txt`. If the current node is public, it waits until at least two public URLs are present so that it can choose a peer that is not itself. If this current node is private, it waits for any public node to appear.
+     
+     - The wait is bounded to about `120 seconds`. If the expected count is not reached within this period, or if the only available URL is the node's own, the script falls back to using `DENARO_SELF_URL` as the bootstrap node.
+     
+     - When the registry contains enough entries, the script selects the first URL that is different from `DENARO_SELF_URL`. If no different URL is found, it falls back to `'self'`.
+   
+   - If `DENARO_BOOTSTRAP_NODE` is `self`, the script resolves it to the current `DENARO_SELF_URL`.
+   
+   - If `DENARO_BOOTSTRAP_NODE` is set to a fixed address, discovery and selection are skipped.
 
-  4. #### **Application `.env` Generation**:
-      - Each node’s entrypoint generates its own application `.env` inside the container at startup using per-service variables, derived values, and shared inputs from either the global `.env` or the shared environment map.
-    
-      - The following variables are included:
-        - **`DENARO_SELF_URL`**
-        - **`DENARO_BOOTSTRAP_NODE`**
-        - **`DENARO_DATABASE_NAME`**
-        - **`POSTGRES_USER`**
-        - **`POSTGRES_PASSWORD`**
-        - **`DENARO_DATABASE_HOST`**
-        - **`DENARO_NODE_HOST`**
-        - **`DENARO_NODE_PORT`**
-      
-      - ***`NODE_NAME`** and **`ENABLE_PINGGY_TUNNEL`** are not persisted.*
+4. #### Application `.env` generation:
+    - Each node's entrypoint generates its own `.env` file inside the container at startup using per service variables, derived values, and shared inputs from either the global `.env` or the shared environment map.
+   - The following variables are written to `.env`:
+     - `DENARO_SELF_URL`
+     - `DENARO_BOOTSTRAP_NODE`
+     - `DENARO_DATABASE_NAME`
+     - `POSTGRES_USER`
+     - `POSTGRES_PASSWORD`
+     - `DENARO_DATABASE_HOST`
+     - `DENARO_NODE_HOST`
+     - `DENARO_NODE_PORT`
+   
+   - `NODE_NAME` and `ENABLE_PINGGY_TUNNEL` are not persisted to `.env`.
+   
+   - The generated `.env` is printed to standard output for inspection.
+   
+    *See [Configuration](#configuration) section for more deatails about environment variables.*
 
-      - The generated `.env` is printed to standard output for inspection.
-  
-      - *See [Configuration](#configuration) section for more deatails about environment variables.*
-    
-  5. #### **Database provisioning**:
-      - **`PGPASSWORD`** is exported and `pg_isready` is awaited until success is reported.
-       
-      - The per-node database is created if it does not already exist by connecting to the default **`postgres`** database.
-       
-      - The application schema from `denaro/schema.sql` is imported only on first database creation.
-       
-      - **`PGPASSWORD`** is unset after provisioning.
-  
-  6. #### **Node launch**:
-      - The node is started with `python run_node.py` after configuration and provisioning are complete.
+5. #### Database provisioning:
+   - `PGPASSWORD` is exported and `pg_isready` is polled until readiness is reported.
+   
+   - For provisioning, the script connects to the PostgreSQL service using the hostname `postgres` for both `pg_isready` and `psql`. The `DENARO_DATABASE_HOST` value written to `.env` is not used by the entrypoint during provisioning.
+   
+   - The per node database is created if it does not already exist by connecting to the default `postgres` database. On first creation only, the application schema from `denaro/schema.sql` is imported into the new database.
+   
+   - `PGPASSWORD` is unset after provisioning completes.
+
+6. #### Node launch:
+   - The node is started with `exec python run_node.py` after configuration and provisioning are complete.
   
   ---
 
@@ -185,18 +187,13 @@ The `Dockerfile` does not copy the repository `.env` into the Docker image. In t
 
 Each node’s entrypoint generates its own application `.env` inside the container at startup using per-service variables, derived values, and shared inputs from either the global `.env` or the shared environment map. *[[Ref. Application .env Generation](#application-env-generation)]*
 
-
 - #### **Environment variables configurable via `docker-compose.yml`**:
-
-  Listed below are the variables can be set per-node.   
-
   - **`NODE_NAME`**: Identifies the node. It is used to derive the database name and internal self URL.
   
   - **`DENARO_NODE_HOST`** : Hostname or IP the node binds to or advertises. This is set to `0.0.0.0` by default so the service binds on all interfaces.
     
   - **`DENARO_NODE_PORT`**: Port number that the node listens on inside the container.
-  
-        
+          
   - **`DENARO_DATABASE_HOST`**, **`POSTGRES_USER`**, **`POSTGRES_PASSWORD`**: 
       - Postgres database credentials. These are used by the entrypoint script for readiness checks and database provisioning.
 
@@ -205,10 +202,13 @@ Each node’s entrypoint generates its own application `.env` inside the contain
   - **`DENARO_BOOTSTRAP_NODE`**: Specifies either the selection criteria or a fixed address for the bootstrap-node.  *See [Bootstrap-node Discovery and Selection](#bootstrap-node-discovery-and-selection) for details*.
     - Accepted values:
       - **`'self'`**: Uses the node’s own internal address.
+      
       - **`'discover'`**: Selects an address from the shared peer registry at `/registry/public_nodes.txt`.
-      - The address of a Denaro Node that is reachable via the Internet or internal network.  *This value must be a valid URL or IP Address and formatted as `'http(s)://<host>:<port>'`, with the port number only relevant when nessessary.*
+      
+      - The address of a Denaro Node that is reachable via the Internet or internal network.  
+      
+    - Note: *Fixed addresses must contain valid URL or IP Address and formatted as `'http(s)://<host>:<port>'`, with the port number only relevant when nessessary.*
         
-          
   - **`ENABLE_PINGGY_TUNNEL`**: Enables a reverse tunnle via [Pinggy.io](https://www.pinggy.io)
     - When **`ENABLE_PINGGY_TUNNEL`** is set to **`'true'`**, the script will establish an SSH reverse tunnel via Pinggy's free tunnleing service (`free.pinggy.io:443`) to expose the node on the Internet. This is intended for testing public node behavior over the Internet. *[[Ref. Optional Public Node Tunnleing]](#optional-public-node-tunnleing)*.
     
@@ -217,7 +217,7 @@ Each node’s entrypoint generates its own application `.env` inside the contain
 - #### **Environment variables not configurable via `docker-compose.yml`**:
   - **`DENARO_DATABASE_NAME`**: Derived per-node as `denaro_${SANITIZED_NODE_NAME}` where **`SANITIZED_NODE_NAME`** replaces hyphens with underscores.
   
-  - **`DENARO_SELF_URL`**: Defaults to `http://${NODE_NAME}:${DENARO_NODE_PORT}` and is replaced by the public URL that is assigneed via [Pinggy.io](https://www.pinggy.io) when tunneling is enabled.
+  - **`DENARO_SELF_URL`**: Defaults to `http://${NODE_NAME}:${DENARO_NODE_PORT}` and is replaced by the public URL that is assigneed via Pinggy.io when tunneling is enabled.
 
   ---
 
