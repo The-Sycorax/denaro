@@ -1,12 +1,12 @@
 version: '3.8'
 
-# All nodes share these settings and environment variables
-# Individual nodes can override them as needed
 x-denaro-node-base: &denaro-node-base
-  build: .
+  build:
+    context: ".."
+    dockerfile: "./docker/Dockerfile"
   restart: unless-stopped
   working_dir: /app
-  env_file: [.env]
+  env_file: ["../.env"]
   labels: ["denaro.node=true"]
   networks: [denaro-net]
   volumes:
@@ -14,24 +14,41 @@ x-denaro-node-base: &denaro-node-base
       target: /app
     - type: volume
       source: node-registry
-      target: /registry
+      target: /shared/node-registry
+    - type: volume
+      source: node-topology
+      target: /shared/node-topology
+      read_only: true
   environment:
     &denaro-node-env
     DENARO_DATABASE_HOST: 'postgres'
     DENARO_NODE_HOST: '0.0.0.0'
 
 services:
+  topology:
+    image: python:3.12-alpine
+    working_dir: /app
+    command: >
+      sh -c "pip install --no-cache-dir pyyaml >/dev/null && python /app/generate-topology.py"
+    volumes:
+      - ./generate-topology.py:/app/generate-topology.py:ro
+      - ./docker-compose.yml:/project/docker-compose.yml:ro
+      - node-topology:/shared/node-topology
+    networks: [denaro-net]
+
   postgres:
     image: postgres:14
-    env_file: [.env]
+    env_file: ["../.env"]
     volumes: [postgres_data:/var/lib/postgresql/data]
     networks: [denaro-net]
 
   node-3006:
     <<: *denaro-node-base
     hostname: node-3006
-    volumes: [node_3006_data:/app, node-registry:/registry]
-    depends_on: [postgres]
+    volumes: [node_3006_data:/app, node-registry:/shared/node-registry, node-topology:/shared/node-topology:ro]
+    depends_on:
+      topology: { condition: service_completed_successfully }
+      postgres: { condition: service_started }
     environment:
       <<: *denaro-node-env
       NODE_NAME: 'node-3006'
@@ -39,6 +56,7 @@ services:
       DENARO_BOOTSTRAP_NODE: 'self'
 
 volumes:
+  node-topology:
   node-registry:
   node_3006_data:
   postgres_data:

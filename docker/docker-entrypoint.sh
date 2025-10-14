@@ -49,7 +49,7 @@
 #   POSTGRES_PASSWORD           Database password
 #
 # Outputs and artifacts:
-#   - A registry file at /registry/public_nodes.txt contains public URLs when available.
+#   - A registry file at /shared/registry/public_nodes.txt contains public URLs when available.
 #   - A .env file is written in the working directory for the application runtime.
 #   - A PostgreSQL database named "denaro_<sanitized node name>" is created if absent.
 #
@@ -67,7 +67,7 @@ set -e
 echo "--- Denaro Node Container Entrypoint for ${NODE_NAME} ---"
 
 # --- CONFIGURATION ---
-REGISTRY_DIR="/registry"                                      # Shared registry directory
+REGISTRY_DIR="/shared/node-registry"                          # Shared registry directory
 REGISTRY_FILE="${REGISTRY_DIR}/public_nodes.txt"              # Shared peer registry file
 mkdir -p "$REGISTRY_DIR"                                      # Ensure registry directory exists
 
@@ -173,7 +173,7 @@ fi
 
 # --- STAGE 4: CONFIGURE AND LAUNCH ---
 echo "Configuring .env file for ${NODE_NAME}..."
-cat << EOF > .env
+cat << EOF > /app/.env
 DENARO_SELF_URL=${DENARO_SELF_URL}
 DENARO_BOOTSTRAP_NODE=${DENARO_BOOTSTRAP_NODE}
 DENARO_DATABASE_NAME=${DB_NAME}
@@ -185,7 +185,7 @@ DENARO_NODE_PORT=${DENARO_NODE_PORT}
 EOF
 
 echo "Generated .env file:"
-cat .env
+cat /app/.env
 echo "----------------------------------------"
 
 # Database provisioning
@@ -213,4 +213,4 @@ unset PGPASSWORD
 
 # Launch the Denaro Node
 echo "Starting Denaro node on 0.0.0.0:${DENARO_NODE_PORT}..."
-exec python run_node.py
+exec python /app/run_node.py
