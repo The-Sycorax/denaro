@@ -176,6 +176,16 @@ class NodesManager:
             NodesManager.sync()
             return True
         return False
+    
+    @staticmethod
+    def find_peer_by_url(url: str) -> Optional[str]:
+        """Finds a peer's node_id by their URL."""
+        if not url:
+            return None
+        for node_id, peer_data in NodesManager.peers.items():
+            if peer_data.get('url') == url:
+                return node_id
+        return None
 
 class NodeInterface:
     def __init__(self, url: str, client: httpx.AsyncClient, db):
