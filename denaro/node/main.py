@@ -38,13 +38,17 @@ from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 
 from denaro.helpers import timestamp, sha256, transaction_to_json
-from denaro.manager import create_block, get_difficulty, Manager, get_transactions_merkle_tree, \
-    split_block_content, calculate_difficulty, clear_pending_transactions, block_to_bytes
+
+from denaro.manager import (
+    create_block, get_difficulty, Manager, get_transactions_merkle_tree, 
+    calculate_difficulty, clear_pending_transactions, block_to_bytes, split_block_content
+)
+
 from denaro.node.nodes_manager import NodesManager, NodeInterface
 from denaro.node.utils import ip_is_local
 from denaro.transactions import Transaction, CoinbaseTransaction
 from denaro import Database
-from denaro.constants import VERSION, ENDIAN
+from denaro.constants import NODE_VERSION, ENDIAN
 from denaro.node.identity import (
     initialize_identity, get_node_id, get_public_key_hex, 
     verify_signature, get_canonical_json_bytes, sign_message
@@ -1759,7 +1763,7 @@ async def middleware(request: Request, call_next):
 
 @app.get("/")
 async def root():
-    return {"version": VERSION, "unspent_outputs_hash": await db.get_unspent_outputs_hash()}
+    return {"node_version": NODE_VERSION, "unspent_outputs_hash": await db.get_unspent_outputs_hash()}
 
 
 @app.post("/push_tx")
@@ -2327,6 +2331,8 @@ async def get_mining_info(
     # Recompute difficulty/tip
     Manager.difficulty = None
     difficulty, last_block = await get_difficulty()
+    
+    next_block_height = (last_block['id'] + 1) if last_block else 0
 
     # Guard mempool size (same as before)
     pending_count = await db.get_pending_transaction_count()
@@ -2369,7 +2375,7 @@ async def get_mining_info(
 
     # Fast-path: nothing pending
     if not candidate_hashes:
-        merkle_root = get_transactions_merkle_tree([])
+        merkle_root = get_transactions_merkle_tree([], next_block_height)
         result = {
             'ok': True,
             'result': {
@@ -2559,8 +2565,8 @@ async def get_mining_info(
     # Compose response
     selected_hex = [tx.hex() for tx in selected]
     selected_hashes_list = [tx.hash() for tx in selected]
-    merkle_root = get_transactions_merkle_tree(selected_hashes_list)
-
+    merkle_root = get_transactions_merkle_tree(selected_hashes_list, next_block_height)
+    
     # Periodic cleanup (unchanged)
     if LAST_PENDING_TRANSACTIONS_CLEAN[0] < timestamp() - 600:
         print("Clearing old pending transactions...")
