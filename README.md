@@ -19,7 +19,7 @@
 * [Denaro Vanity Generator](https://github.com/The-Sycorax/Denaro-Vanity-Generator)
 * [Denaro-Vanity-Gen](https://github.com/Avecci-Claussen/Denaro-Vanity-Gen)
   
-## Installation
+## Node setup
 **Automated configuration and deployment of a Denaro node are facilitated by the `setup.sh` script. It handles system package updates, manages environment variables, configures the PostgreSQL database, sets up a Python virtual environment, installs the required Python dependencies, and initiates the Denaro node. This script ensures that all prerequisites for operating a Denaro node are met and properly configured accoring to the user's preference.**
  
 - The setup script accepts three optional arguments to adjust its behavior during installation:
@@ -205,6 +205,9 @@ To synchronize a node with the Denaro blockchain, send a request to the `/sync_b
 ```bash
 curl http://127.0.0.1:3006/sync_blockchain
 ```
+
+## Nodeless wallet setup
+To setup a nodeless wallet, use [Denaro Wallet Client GUI](https://github.com/The-Sycorax/DenaroWalletClient-GUI).
 
 ## License
 Denaro is released under the terms of the GNU Affero General Public License v3.0. See [LICENSE](LICENSE) for more information or goto https://www.gnu.org/licenses/agpl-3.0.en.html
