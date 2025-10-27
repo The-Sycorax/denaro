@@ -229,14 +229,38 @@ class Consensus_V1(BaseConsensusRules):
         time_ratio: Decimal,
         current_difficulty: Decimal,
         legacy_hashrate_func: Callable = None) -> Decimal:
-        """Improved difficulty calculation with better clamping."""
-        from .constants import START_DIFFICULTY
+        """
+        Calculate the adjusted mining difficulty for the next period.
         
-        ratio = max(Decimal('0.5'), min(time_ratio, Decimal('2.0')))
-        new_difficulty = current_difficulty * ratio
+        Args:
+            time_ratio: Ratio of target block time to actual average block time.
+                       Values > 1.0 indicate blocks mined too slowly (increase difficulty).
+                       Values < 1.0 indicate blocks mined too quickly (decrease difficulty).
+                       Clamped between 0.25 and 4.0 for stability.
+            current_difficulty: The current difficulty value before adjustment.
+            legacy_hashrate_func: Optional legacy function for backward compatibility.
+        
+        Returns:
+            The adjusted difficulty value, never below START_DIFFICULTY.
+        
+        The adjustment is calculated by converting difficulty to hashrate,
+        applying the time adjustment ratio in hashrate space, and converting
+        back to difficulty to maintain the proper logarithmic relationship.
+        """
+        from .constants import START_DIFFICULTY
+        from .manager import difficulty_to_hashrate, hashrate_to_difficulty
+        
+        ratio = max(Decimal('0.25'), min(time_ratio, Decimal('4.0')))
+        
+        # Apply ratio to hashrate, not directly to difficulty
+        current_hashrate = difficulty_to_hashrate(current_difficulty)
+        new_estimated_hashrate = current_hashrate * ratio
+        new_difficulty = hashrate_to_difficulty(new_estimated_hashrate)
+        
+        # Ensure difficulty doesn't drop below starting value
         new_difficulty = max(START_DIFFICULTY, new_difficulty)
         
-        return round(new_difficulty, 1)
+        return new_difficulty
     
     def validate_coinbase_transactions(self, transactions: List[Any]) -> bool:
         """V1 validation: Forbids coinbase transactions in regular tx list."""
