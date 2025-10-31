@@ -2,13 +2,23 @@
 [![Language](https://img.shields.io/badge/language-Python%203.8+-blue.svg)](https://isocpp.org/)
 [![Platform](https://img.shields.io/badge/platform-Linux%20or%20WSL2-brightgreen.svg)](https://www.microsoft.com/windows/)
 
-**Denaro**, 'money' in Italian, is a cryptocurrency developed entirely in Python and utilizes PostgreSQL for it's blockchain.
+**Denaro**, "money" in Italian, is a cryptocurrency developed entirely in Python and utilizes PostgreSQL for it's blockchain.
 
 * **Features**: 
-  * Maximum supply of 33,554,432 coins.
   * Allows for transactions with up to 6 decimal places.
   * Blocks are generated approximately every ~3 minutes, with a limit of 2MB per block.
   * Given an average transaction size of 250 bytes (comprising of 5 inputs and 2 outputs), a single block can accommodate approximately ~8300 transactions, which translates to about ~40 transactions per second.
+
+* **Monetary Policy**:
+  
+  **The monetary policy for Denaro has been chosen for its optimal balance of a scarce total supply, frequent halving events, and long-term emission lifespan.**
+  
+  * Initial Reward Per Block: **64 DNR**
+  * Halving Interval: **262,144 blocks**.
+    * Targets ~2.5 years per halving.
+  * Maximum halvings: **64**
+  * Estimated Emission Lifespan: **~160 years**.
+  * Maximum Total Supply: **33,554,432 DNR**
 
 ## Denaro Projects
 * [Denaro Wallet Client GUI](https://github.com/The-Sycorax/DenaroWalletClient-GUI)
@@ -145,9 +155,7 @@ deactivate
     ```
 
 - **Rewards**:
-  - Block rewards decrease by half over time until they reach zero.
-  - Rewards start at `100` for the initial `150,000` blocks, decreasing in predetermined steps until a final reward of `0.3125` for the `458,733`rd block.
-  - After this, blocks do not offer a mining reward, but transaction fees are still applicable. A transaction may also have no fees at all.
+  - Block rewards start at `64` and decrease by half every`262,144` blocks until they reach zero.
 
 - **The `miner.py` script can be used to mine Denaro**:
           
@@ -205,6 +213,8 @@ deactivate
   </dd></dl>
   </details>
 
+* For GPU mining please refer to [Denaro CUDA Miner Setup and Usage](https://github.com/The-Sycorax/denaro/tree/main/miner).
+
 
 ## Sync Blockchain
 
@@ -214,7 +224,7 @@ To synchronize a node with the Denaro blockchain, send a request to the `/sync_b
 curl http://127.0.0.1:3006/sync_blockchain
 ```
 
-## Nodeless wallet setup
+## Nodeless Wallet Setup
 To setup a nodeless wallet, use [Denaro Wallet Client GUI](https://github.com/The-Sycorax/DenaroWalletClient-GUI).
 
 ## License
