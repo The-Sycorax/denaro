@@ -1,15 +1,17 @@
 # Denaro
+[![Language](https://img.shields.io/badge/language-Python%203.8+-blue.svg)](https://isocpp.org/)
+[![Platform](https://img.shields.io/badge/platform-Linux%20or%20WSL2-brightgreen.svg)](https://www.microsoft.com/windows/)
+
 **Denaro**, 'money' in Italian, is a cryptocurrency developed entirely in Python and utilizes PostgreSQL for it's blockchain.
 
 * **Features**: 
-  * Maximum supply of 30,062,005 coins.
+  * Maximum supply of 33,554,432 coins.
   * Allows for transactions with up to 6 decimal places.
   * Blocks are generated approximately every ~3 minutes, with a limit of 2MB per block.
   * Given an average transaction size of 250 bytes (comprising of 5 inputs and 2 outputs), a single block can accommodate approximately ~8300 transactions, which translates to about ~40 transactions per second.
 
 ## Denaro Projects
 * [Denaro Wallet Client GUI](https://github.com/The-Sycorax/DenaroWalletClient-GUI)
-* [Denaro Wallet Client CLI](https://github.com/The-Sycorax/DenaroWalletClient)
 * [Denaro CUDA Pool miner](https://github.com/1460293896/denaro-cuda-miner)
 * [DenaroCudaMiner (Solo)](https://github.com/witer33/denarocudaminer)
 * [Denaro WASM Miner](https://github.com/geiccobs/denaro-wasm-miner)
@@ -82,8 +84,9 @@ Once the required packages have been installed, the `--skip-package-install` arg
 **Setup with Docker**:
 
   ```bash
-  make build
-  docker-compose up -d
+  cd path/to/denaro
+  cd docker
+  docker-compose -f docker-compose.yml up --build -d
   ```
 
 ## Running a Denaro Node
@@ -106,8 +109,11 @@ source venv/bin/activate
 # Install the required packages if needed.
 pip install -r requirements.txt
 
-# Manualy start the Denaro node on port 3006 or another specified port.
-uvicorn denaro.node.main:app --host 127.0.0.1 --port 3006
+# Start the Denaro Node
+python3 run_node.py
+
+# Manualy start the Denaro node via uvicorn (Optional).
+uvicorn denaro.node.main:app --host 127.0.0.1 --port 3006 
 
 # To stop the node, press Ctrl+C in the terminal.
 ```
@@ -151,7 +157,7 @@ deactivate
   
   - **Syntax**:
       ```bash
-      miner.py [-h] [-a ADDRESS] [-n NODE] [-w WORKERS] 
+      miner.py [-h] [-a ADDRESS] [-n NODE] [-w WORKERS] [-m MAX_BLOCKS]
       ```
   
   - **Arguments**:
@@ -160,7 +166,9 @@ deactivate
 
       * `--workers`, `-w` (Optional): The number of parallel processes to run. It's recommended to set this to the number of CPU cores you want to use for mining. Defaults to 1.
 
-      * `--node`, `-n` (Optional): The URL of the Denaro node API to connect to for mining data. Defaults to http://127.0.0.1:3006/. 
+      * `--workers`, `-w` (Optional): The number of parallel processes to run. It's recommended to set this to the number of CPU cores you want to use for mining. Defaults to 1.
+
+      * `--max-blocks`, `-m` (Optional): Max number of blocks to mine before exit.
 
       * `--help`, `-h`: Shows the help message.
 
@@ -169,7 +177,7 @@ deactivate
   <dl><dd>
   
   - #### 1. Basic Mining (Single Core)
-    To start mining to your address using a single CPU core and the default local node:
+    To mine using a single CPU core and the default local node:
     
     ```bash
     python3 miner.py --address YOUR_WALLET_ADDRESS
@@ -177,7 +185,7 @@ deactivate
   
   - #### 2. Mining with a Remote Node
   
-    To mine using 4 cores while connected to a specific public node:
+    To mine while connected to a specific public node:
     
     ```bash
     python3 miner.py --address YOUR_WALLET_ADDRESS --node http://a-public-node.com:3006
