@@ -83,7 +83,7 @@ The `setup.sh` script is designed for traditional configuration and deployment o
 
   ```bash
   # Clone the Denaro repository to your local machine.
-  git clone https://github.com/denaro-coin/denaro.git
+  git clone https://github.com/The-Sycorax/denaro.git
   
   # Change directory to the cloned repository.
   cd denaro
@@ -166,7 +166,7 @@ To test public node behavior over the Internet, the Docker setup includes option
 
 ```bash
 # Clone the Denaro repository to your local machine.
-git clone https://github.com/denaro-coin/denaro.git
+git clone https://github.com/The-Sycorax/denaro.git
 
 # Change directory to the cloned repository.
 cd denaro 
