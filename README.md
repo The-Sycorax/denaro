@@ -59,7 +59,7 @@
 ### Links:
 * **Current Website (Stale): [https://denaro.is](https://denaro.is/)**
 * **New Unofficial Website: [http://dinero.mine.bz](http://dinero.mine.bz/)**
-* **Denaro Node: [http://dinero.mine.bz:3006](http://dinero.mine.bz:3006/)**
+* **Denaro Node: [https://node.denaro.network](https://node.denaro.network/)**
 * **Block Explorer: [https://denaro-explorer.aldgram-solutions.fr](https://denaro-explorer.aldgram-solutions.fr/)**
 * **Discord Server: [https://discord.gg/4Sq2dK4KMv](https://discord.gg/4Sq2dK4KMv)**
 
