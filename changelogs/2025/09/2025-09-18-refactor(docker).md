@@ -118,7 +118,8 @@ The script is designed to proceed on recoverable issues by using conservative fa
    
       - This value is held in the shell as `DB_NAME` and is persisted into the generated `.env` as `DENARO_DATABASE_NAME`. It is not exported into the entrypoint process environment.
    
-   - `DENARO_SELF_URL` is set to `http://${NODE_NAME}:${DENARO_NODE_PORT}` as a safe baseline and fallback.
+   - ~~`DENARO_SELF_URL` is set to `http://${NODE_NAME}:${DENARO_NODE_PORT}` as a safe baseline and fallback.~~
+      - *This logic was later updated in commit [ecf57a8b](https://github.com/The-Sycorax/denaro/commit/ecf57a8bf1675b5788ce38519b1a020a3d90021c) to support external overrides and to prevent the script from overwriting the variable if it was already set. It now defaults to `http://${NODE_NAME}:${DENARO_NODE_PORT}` only when it's left unset.*
    
    - Bootstrap intent is normalized. If `DENARO_BOOTSTRAP_NODE` is not provided, it is set to `'self'` by default.
 
@@ -219,7 +220,8 @@ Each node’s entrypoint generates its own application `.env` inside the contain
 - #### **Environment variables not configurable via `docker-compose.yml`**:
   - **`DENARO_DATABASE_NAME`**: Derived per-node as `denaro_${SANITIZED_NODE_NAME}` where **`SANITIZED_NODE_NAME`** replaces hyphens with underscores.
   
-  - **`DENARO_SELF_URL`**: Defaults to `http://${NODE_NAME}:${DENARO_NODE_PORT}` and is replaced by the public URL that is assigneed via Pinggy.io when tunneling is enabled.
+  - **`DENARO_SELF_URL`**: ~~Defaults to `http://${NODE_NAME}:${DENARO_NODE_PORT}`~~ and is replaced by the public URL that is assigneed via Pinggy.io when tunneling is enabled.
+    - *This logic was later updated in commit [ecf57a8b](https://github.com/The-Sycorax/denaro/commit/ecf57a8bf1675b5788ce38519b1a020a3d90021c) to support external overrides and to prevent the script from overwriting the variable if it was already set. It now defaults to `http://${NODE_NAME}:${DENARO_NODE_PORT}` only when it's left unset.*
 
   ---
 

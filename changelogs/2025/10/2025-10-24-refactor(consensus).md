@@ -108,7 +108,7 @@ The `denaro/manager.py` module has been significantly refactored to utilize the 
             - This prevents various timestamp manipulation attacks. It also enforces a stricter future-time limit, rejecting blocks with a timestamp more than 60 seconds ahead of the node's current system time.
 
         - **`calculate_new_difficulty`**:
-            - Implements an improved difficulty adjustment formula. It clamps the calculated time ratio between `0.5x` and `2.0x`  for more stable retargeting. The new difficulty is calculated as `current_difficulty * clamped_ratio` and is floored by `START_DIFFICULTY`.
+            - ~~Implements an improved difficulty adjustment formula. It clamps the calculated time ratio between `0.5x` and `2.0x`  for more stable retargeting. The new difficulty is calculated as `current_difficulty * clamped_ratio` and is floored by `START_DIFFICULTY`.~~
             
             - **Bug Fix ([d1ce09e4](https://github.com/The-Sycorax/denaro/commit/d1ce09e4a4e7cc0d7373674aa49b9ad77ff5098e))**:
                 - This implementation was later corrected in commit [d1ce09e4](https://github.com/The-Sycorax/denaro/commit/d1ce09e4a4e7cc0d7373674aa49b9ad77ff5098e) to fix a bug causing exaggerated difficulty adjustments. The corrected logic converts the current difficulty to its equivalent hashrate. The time ratio is then applied to this hashrate value, and the result is converted back to difficulty. Ratio clamping was also reverted back to `0.25x` and `4.0x`.
