@@ -74,8 +74,10 @@ mkdir -p "$REGISTRY_DIR"                                      # Ensure registry 
 SANITIZED_NODE_NAME=$(echo "${NODE_NAME}" | tr '-' '_')       # Replace hyphens with underscores for DB naming
 DB_NAME="denaro_${SANITIZED_NODE_NAME}"                       # Per-node database name
 
-# Set a default internal URL used as a safe baseline and as a fallback
-export DENARO_SELF_URL="http://${NODE_NAME}:${DENARO_NODE_PORT}"
+# Default to internal URL if unset
+if [ -z "${DENARO_SELF_URL}" ]; then
+  export DENARO_SELF_URL="http://${NODE_NAME}:${DENARO_NODE_PORT}"
+fi
 
 # Normalize bootstrap intent default if unset
 if [ -z "${DENARO_BOOTSTRAP_NODE}" ]; then

@@ -1,16 +1,6 @@
 ## Denaro CUDA Miner Setup and Usage
 
-`cuda_miner.py` is a GPU accelerated single worker mining script for Denaro. It uses PyCUDA to JIT (Just in Time) compile a CUDA kernel for a SHA256 based nonce search over a constant block prefix and submits candidate blocks to a specified Denaro node. 
-
----
-
-### Features
-
-- PyCUDA JIT compilation of the mining kernel.
-- Interleaved nonce stepping across threads/blocks.
-- Exact CPU-miner semantics for block layout and difficulty handling.
-- Result submission to a Denaro node with SUCCESS/STALE/FAILED handling.
-- Optional environment bootstrap to surface CUDA in `PATH` / `LD_LIBRARY_PATH`.
+`cuda_miner.py` is a GPU accelerated single worker mining script for Denaro. It uses PyCUDA to JIT (Just in Time) compile a CUDA kernel for a SHA256 based nonce search over a constant block prefix and submits candidate blocks to a specified Denaro node.
 
 ---
 

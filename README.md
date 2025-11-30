@@ -204,13 +204,29 @@ To add or modify nodes in `docker-compose.yml`, use the structure outlined in th
     depends_on:
       topology: { condition: service_completed_successfully }
       postgres: { condition: service_started }
+    ports: ["3006:3006"]
     environment:
       <<: *denaro-node-env
       NODE_NAME: 'node-3006'
       DENARO_NODE_PORT: '3006'
-      DENARO_BOOTSTRAP_NODE: 'self'
-      # Uncomment to enable public tunnleing via Pinggy.io
+      
+      # This variable specifies either the selection criteria or a fixed address for the bootstrap-node.
+      # It essentially connects the node to Denaro's P2P Network. Defaults to 'self' if left blank.
+      # Accepted values:
+      #   - 'self': Uses the node’s own internal address. If this value is set but no peers connect to this
+      #           node, then it will be isolated from the rest of P2P network. 
+      #   - 'discover': Selects an address from the shared peer registry at /registry/public_nodes.txt.
+      #   - The address of a Denaro Node that is reachable via the Internet or internal network.
+      DENARO_BOOTSTRAP_NODE: ''
+      
+      # This variable enables public tunnleing via Pinggy.io for up to 60 minutes.
       #ENABLE_PINGGY_TUNNEL: 'true'
+ 
+      # This variable specifies the the publically reachable address of the node itself, and is required for
+      # publically facing nodes. When left blank it will default to http://${NODE_NAME}:${DENARO_NODE_PORT}. 
+      # Setting ENABLE_PINGGY_TUNNEL to 'true' will override this variable with the public URL that is
+      # assigneed to the node via Pinggy.io.
+      DENARO_SELF_URL: ''
 
 volumes:
   node-topology:
@@ -242,11 +258,29 @@ networks:
     depends_on:
       topology: { condition: service_completed_successfully }
       postgres: { condition: service_started }
+    ports: ["3006:3006"]
     environment:
       <<: *denaro-node-env
       NODE_NAME: 'node-3006'
       DENARO_NODE_PORT: '3006'
-      DENARO_BOOTSTRAP_NODE: 'self'
+      
+      # This variable specifies either the selection criteria or a fixed address for the bootstrap-node.
+      # It essentially connects the node to Denaro's P2P Network. Defaults to 'self' if left blank.
+      # Accepted values:
+      #   - 'self': Uses the node’s own internal address. If this value is set but no peers connect to this
+      #           node, then it will be isolated from the rest of P2P network. 
+      #   - 'discover': Selects an address from the shared peer registry at /registry/public_nodes.txt.
+      #   - The address of a Denaro Node that is reachable via the Internet or internal network.
+      DENARO_BOOTSTRAP_NODE: ''
+      
+      # This variable enables public tunnleing via Pinggy.io for up to 60 minutes.
+      #ENABLE_PINGGY_TUNNEL: 'true'
+ 
+      # This variable specifies the the publically reachable address of the node itself, and is required for
+      # publically facing nodes. When left blank it will default to http://${NODE_NAME}:${DENARO_NODE_PORT}. 
+      # Setting ENABLE_PINGGY_TUNNEL to 'true' will override this variable with the public URL that is
+      # assigneed to the node via Pinggy.io.
+      DENARO_SELF_URL: ''
 
   # Second node - connects to first node
   node-3007:
@@ -260,6 +294,8 @@ networks:
       topology: { condition: service_completed_successfully }
       postgres: { condition: service_started }
       node-3006: { condition: service_healthy }
+    # Uncomment to access the node outside of docker.
+    #ports: ["3007:3007"]
     environment:
       <<: *denaro-node-env
       NODE_NAME: 'node-3007'
@@ -278,6 +314,8 @@ networks:
       topology: { condition: service_completed_successfully }
       postgres: { condition: service_started }
       node-3007: { condition: service_healthy }
+    # Uncomment to access the node outside of docker.
+    #ports: ["3008:3008"]
     environment:
       <<: *denaro-node-env
       NODE_NAME: 'node-3008'
