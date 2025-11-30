@@ -1,5 +1,3 @@
-version: '3.8'
-
 x-denaro-node-base: &denaro-node-base
   build:
     context: ".."
