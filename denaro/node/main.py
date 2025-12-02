@@ -765,8 +765,15 @@ MAX_PENDING_POOL_SIZE = 10000  # Maximum transactions in mempool
 CONNECTION_TIMEOUT = 10.0
 #HANDSHAKE_REPLAY_WINDOW = 300  # 5 minutes replay protection window
 
+db: Database = None
+self_node_id: str = None
+self_is_public: bool = False 
+config = dotenv_values(".env")
+self_url = config.get("DENARO_SELF_URL") 
+DENARO_BOOTSTRAP_NODE_URL = config.get("DENARO_BOOTSTRAP_NODE")
+
 limiter = Limiter(key_func=rate_limit_key_func)
-app = FastAPI()
+app = FastAPI(servers=[{"url": self_url, "description": "Denaro Node"}])
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
@@ -776,14 +783,6 @@ app.add_middleware(
     allow_methods=["GET", "POST"],
     allow_headers=["*"],
 )
-
-db: Database = None
-self_node_id: str = None
-
-config = dotenv_values(".env")
-self_url = config.get("DENARO_SELF_URL") 
-self_is_public: bool = False 
-DENARO_BOOTSTRAP_NODE_URL = config.get("DENARO_BOOTSTRAP_NODE")
 
 # Initialize security components
 security = SecureNodeComponents()
