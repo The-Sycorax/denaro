@@ -81,8 +81,37 @@ fi
 
 # Normalize bootstrap intent default if unset
 if [ -z "${DENARO_BOOTSTRAP_NODE}" ]; then
-  export DENARO_BOOTSTRAP_NODE="self"
+  export DENARO_BOOTSTRAP_NODE="https://node.denaro.network"
 fi
+
+if [ -z "${LOG_LEVEL}" ]; then
+  export LOG_LEVEL="INFO"
+fi
+
+if [ -z "${LOG_FORMAT}" ]; then
+  export LOG_FORMAT="%(asctime)s UTC - %(levelname)s - %(name)s - %(message)s"
+fi
+
+if [ -z "${LOG_DATE_FORMAT}" ]; then
+  export LOG_DATE_FORMAT="%Y-%m-%dT%H:%M:%S"
+fi
+
+if [ -z "${LOG_INCLUDE_REQUEST_CONTENT}" ]; then
+  export LOG_INCLUDE_REQUEST_CONTENT="False"
+fi
+
+if [ -z "${LOG_INCLUDE_RESPONSE_CONTENT}" ]; then
+  export LOG_INCLUDE_RESPONSE_CONTENT="False"
+fi
+
+if [ -z "${LOG_INCLUDE_BLOCK_SYNC_MESSAGES}" ]; then
+  export LOG_INCLUDE_BLOCK_SYNC_MESSAGES="False"
+fi
+
+if [ -z "${LOG_CONSOLE_HIGHLIGHTING}" ]; then
+  export LOG_CONSOLE_HIGHLIGHTING="True"
+fi
+
 
 # --- STAGE 1: OPTIONAL PUBLIC TUNNEL VIA PINGGY ---
 # If tunneling is requested, attempt to capture a public URL. Failure falls back to internal URL.
@@ -94,15 +123,15 @@ if [ "${ENABLE_PINGGY_TUNNEL}" = "true" ]; then
 
   echo "Waiting for Pinggy to provide a public URL..."
   COUNTER=0
-  PUBLIC_URL=""
+  PUBLIC_ADDRESS=""
   # Up to 30 seconds for capture, scanning the log each second
   while [ $COUNTER -lt 30 ]; do
     # Extract the first matching https endpoint from Pinggy output
-    PUBLIC_URL=$(grep -o 'https://[a-zA-Z0-9-]*\.a\.free\.pinggy\.link' /tmp/pinggy.log | head -n 1 || true)
-    if [ -n "$PUBLIC_URL" ]; then
-      echo "SUCCESS: Captured public URL: ${PUBLIC_URL}"
-      export DENARO_SELF_URL="${PUBLIC_URL}"                 # Promote captured public URL to self URL
-      echo "${PUBLIC_URL}" >> "${REGISTRY_FILE}"             # Publish to registry for peer discovery
+    PUBLIC_ADDRESS=$(grep -o 'https://[a-zA-Z0-9-]*\.a\.free\.pinggy\.link' /tmp/pinggy.log | head -n 1 || true)
+    if [ -n "$PUBLIC_ADDRESS" ]; then
+      echo "SUCCESS: Captured public URL: ${PUBLIC_ADDRESS}"
+      export DENARO_SELF_URL="${PUBLIC_ADDRESS}"                 # Promote captured public URL to self URL
+      echo "${PUBLIC_ADDRESS}" >> "${REGISTRY_FILE}"             # Publish to registry for peer discovery
       echo "Published public URL to registry."
       break
     fi
@@ -111,7 +140,7 @@ if [ "${ENABLE_PINGGY_TUNNEL}" = "true" ]; then
   done
 
   # Fallback if no public URL could be captured
-  if [ -z "$PUBLIC_URL" ]; then
+  if [ -z "$PUBLIC_ADDRESS" ]; then
     echo "WARNING: Could not get public URL from Pinggy output. Falling back to internal URL."
     echo "Disabling tunneling to prevent dependent logic from waiting on a public endpoint."
     export DENARO_SELF_URL="http://${NODE_NAME}:${DENARO_NODE_PORT}"
@@ -157,9 +186,9 @@ if [ "${DENARO_BOOTSTRAP_NODE}" = "discover" ]; then
     echo "Applying fallback for discovery: setting DENARO_BOOTSTRAP_NODE to self."
   else
     # Registry has enough lines. Pick a peer that is not ourselves
-    OTHER_PUBLIC_URL=$(grep -v "${DENARO_SELF_URL}" "${REGISTRY_FILE}" | head -n 1 || true)
-    if [ -n "${OTHER_PUBLIC_URL}" ]; then
-      export DENARO_BOOTSTRAP_NODE="${OTHER_PUBLIC_URL}"
+    OTHER_PUBLIC_ADDRESS=$(grep -v "${DENARO_SELF_URL}" "${REGISTRY_FILE}" | head -n 1 || true)
+    if [ -n "${OTHER_PUBLIC_ADDRESS}" ]; then
+      export DENARO_BOOTSTRAP_NODE="${OTHER_PUBLIC_ADDRESS}"
       echo "Discovered and selected bootstrap peer: ${DENARO_BOOTSTRAP_NODE}"
     else
       echo "WARNING: Could not discover a different bootstrap peer URL. Falling back to self."
@@ -176,14 +205,23 @@ fi
 # --- STAGE 4: CONFIGURE AND LAUNCH ---
 echo "Configuring .env file for ${NODE_NAME}..."
 cat << EOF > /app/.env
-DENARO_SELF_URL=${DENARO_SELF_URL}
-DENARO_BOOTSTRAP_NODE=${DENARO_BOOTSTRAP_NODE}
-DENARO_DATABASE_NAME=${DB_NAME}
-POSTGRES_USER=${POSTGRES_USER}
-POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
-DENARO_DATABASE_HOST=${DENARO_DATABASE_HOST}
 DENARO_NODE_HOST=${DENARO_NODE_HOST}
 DENARO_NODE_PORT=${DENARO_NODE_PORT}
+DENARO_SELF_URL=${DENARO_SELF_URL}
+DENARO_BOOTSTRAP_NODE=${DENARO_BOOTSTRAP_NODE}
+
+DENARO_DATABASE_NAME=${DB_NAME}
+DENARO_DATABASE_HOST=${DENARO_DATABASE_HOST}
+POSTGRES_USER=${POSTGRES_USER}
+POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+
+LOG_LEVEL=${LOG_LEVEL}
+LOG_FORMAT=${LOG_FORMAT}
+LOG_DATE_FORMAT=${LOG_DATE_FORMAT}
+LOG_CONSOLE_HIGHLIGHTING=${LOG_CONSOLE_HIGHLIGHTING}
+LOG_INCLUDE_REQUEST_CONTENT=${LOG_INCLUDE_REQUEST_CONTENT}
+LOG_INCLUDE_RESPONSE_CONTENT=${LOG_INCLUDE_RESPONSE_CONTENT}
+LOG_INCLUDE_BLOCK_SYNC_MESSAGES=${LOG_INCLUDE_BLOCK_SYNC_MESSAGES}
 EOF
 
 echo "Generated .env file:"

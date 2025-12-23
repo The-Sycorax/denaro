@@ -219,7 +219,7 @@ To add or modify nodes in `docker-compose.yml`, use the structure outlined in th
       #           node, then it will be isolated from the rest of P2P network. 
       #   - 'discover': Selects an address from the shared peer registry at /registry/public_nodes.txt.
       #   - The address of a Denaro Node that is reachable via the Internet or internal network.
-      DENARO_BOOTSTRAP_NODE: ''
+      DENARO_BOOTSTRAP_NODE: 'https://node.denaro.network'
       
       # This variable enables public tunnleing via Pinggy.io for up to 60 minutes.
       #ENABLE_PINGGY_TUNNEL: 'true'
@@ -273,7 +273,7 @@ networks:
       #           node, then it will be isolated from the rest of P2P network. 
       #   - 'discover': Selects an address from the shared peer registry at /registry/public_nodes.txt.
       #   - The address of a Denaro Node that is reachable via the Internet or internal network.
-      DENARO_BOOTSTRAP_NODE: ''
+      DENARO_BOOTSTRAP_NODE: 'https://node.denaro.network'
       
       # This variable enables public tunnleing via Pinggy.io for up to 60 minutes.
       #ENABLE_PINGGY_TUNNEL: 'true'

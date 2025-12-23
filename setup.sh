@@ -37,7 +37,9 @@ DENARO_DATABASE_HOST="127.0.0.1"
 DENARO_NODE_HOST="127.0.0.1"
 DENARO_NODE_PORT="3006"
 DENARO_SELF_URL= ""
-DENARO_BOOTSTRAP_NODE=""
+DENARO_BOOTSTRAP_NODE="https://node.denaro.network"
+LOG_LEVEL="INFO"
+LOG_CONSOLE_HIGHLIGHTING="True"
 
 USE_DEFAULT_ENV_VARS=false 
 # Path to the .env file
@@ -158,8 +160,8 @@ validate_port_input() {
         elif ! [[ "$input_port" =~ ^[0-9]+$ ]]; then
             echo "Invalid input. Port must be a number."
             echo ""
-        elif (( input_port < 1024 || input_port > 49151 )); then
-            echo "Invalid port number. Port must be between 1024 and 49151."
+        elif (( input_port < 1 || input_port > 65535 )); then
+            echo "Invalid port number. Port must be between 1 and 65535."
             echo ""
         else
             break
@@ -173,7 +175,7 @@ load_env_variables() {
     if [[ -f "$env_file" ]]; then
         #echo "Loading existing configurations..."
         while IFS='=' read -r key value; do
-            if [[ $key == POSTGRES_USER || $key == POSTGRES_PASSWORD || $key == DENARO_DATABASE_NAME || $key == DENARO_DATABASE_HOST || $key == DENARO_NODE_HOST || $key == DENARO_NODE_PORT || $key == DENARO_SELF_URL || $key == DENARO_BOOTSTRAP_NODE ]]; then
+            if [[ $key == POSTGRES_USER || $key == POSTGRES_PASSWORD || $key == DENARO_DATABASE_NAME || $key == DENARO_DATABASE_HOST || $key == DENARO_NODE_HOST || $key == DENARO_NODE_PORT || $key == DENARO_SELF_URL || $key == DENARO_BOOTSTRAP_NODE || $key == LOG_LEVEL || $key == LOG_CONSOLE_HIGHLIGHTING ]]; then
                 eval $key="'$value'"
             fi
         done < "$env_file"
@@ -200,7 +202,8 @@ identify_missing_variables() {
     grep -qE "^DENARO_NODE_PORT=.+" "$env_file" || missing_vars+=("DENARO_NODE_PORT")
     grep -qE "^DENARO_SELF_URL=.+" "$env_file" || missing_vars+=("DENARO_SELF_URL")
     grep -qE "^DENARO_BOOTSTRAP_NODE=.+" "$env_file" || missing_vars+=("DENARO_BOOTSTRAP_NODE")
-
+    grep -qE "^LOG_LEVEL=.+" "$env_file" || missing_vars+=("LOG_LEVEL")
+    grep -qE "^LOG_CONSOLE_HIGHLIGHTING=.+" "$env_file" || missing_vars+=("LOG_CONSOLE_HIGHLIGHTING")
     echo "${missing_vars[@]}"
 }
 
@@ -304,13 +307,13 @@ set_env_variables() {
             if ! $SKIP_PROMPTS; then
                 # Prompt the user to decide if they want to update the current configuration
                 while true; do
-                    read -p "Do you want to update the current configuration? (Y/N): " update_choice
+                    read -p "Do you want to update the current configuration? (y/n): " update_choice
                     case "$update_choice" in
                         [Yy] )
                             local update_missing_vars=true
                             local show_current_vars=true
                             PROMPT_FOR_DEFAUT=false
-                            missing_vars=("POSTGRES_USER" "POSTGRES_PASSWORD" "DENARO_DATABASE_NAME" "DENARO_DATABASE_HOST" "DENARO_NODE_HOST" "DENARO_NODE_PORT" "DENARO_SELF_URL "DENARO_BOOTSTRAP_NODE"")
+                            missing_vars=("POSTGRES_USER" "POSTGRES_PASSWORD" "DENARO_DATABASE_NAME" "DENARO_DATABASE_HOST" "DENARO_NODE_HOST" "DENARO_NODE_PORT" "DENARO_SELF_URL "DENARO_BOOTSTRAP_NODE" "LOG_LEVEL" "LOG_CONSOLE_HIGHLIGHTING"")
                             echo "Leave blank to keep the current value."
                             echo ""
                             break;;
@@ -319,7 +322,7 @@ set_env_variables() {
                             load_env_variables
                             return 0;;
                         * )
-                            echo "Invalid input. Please enter 'Y' or 'N'."; echo "";;
+                            echo "Invalid input. Please enter 'y' or 'n'."; echo "";;
                     esac
                 done
             else
@@ -346,7 +349,7 @@ set_env_variables() {
     if ! $SKIP_PROMPTS; then
         if $PROMPT_FOR_DEFAUT; then
             while true; do
-                read -p "Do you want to use the default values for configuration? (Y/N): " use_defaults
+                read -p "Do you want to use the default values for configuration? (y/n): " use_defaults
                 case "$use_defaults" in
                     [Yy] ) 
                         USE_DEFAULT_ENV_VARS=true 
@@ -358,7 +361,7 @@ set_env_variables() {
                         echo ""
                         break;;
                     * ) 
-                        echo "Invalid input. Please enter 'Y' or 'N'."; echo "";;
+                        echo "Invalid input. Please enter 'y' or 'n'."; echo "";;
                 esac
             done
         else
@@ -380,9 +383,11 @@ set_env_variables() {
     [[ " ${missing_vars[*]} " =~ " DENARO_DATABASE_HOST " ]] && update_variable "Enter database host" "DENARO_DATABASE_HOST" $update_missing_vars $show_current_vars
     [[ " ${missing_vars[*]} " =~ " DENARO_NODE_HOST " ]] && update_variable "Enter local Denaro node address or hostname" "DENARO_NODE_HOST" $update_missing_vars $show_current_vars
     [[ " ${missing_vars[*]} " =~ " DENARO_NODE_PORT " ]] && update_variable "Enter local Denaro node port" "DENARO_NODE_PORT" $update_missing_vars $show_current_vars
-    [[ " ${missing_vars[*]} " =~ " DENARO_SELF_URL " ]] && update_variable "Enter the public URL of this Denaro node (e.g., https://yourdomain.com). Leave blank if the node is private" "DENARO_SELF_URL" $update_missing_vars $show_current_vars
+    [[ " ${missing_vars[*]} " =~ " DENARO_SELF_URL " ]] && update_variable "Enter the public address of this Denaro node (e.g., https://yourdomain.com). Leave blank if the node is private" "DENARO_SELF_URL" $update_missing_vars $show_current_vars
     [[ " ${missing_vars[*]} " =~ " DENARO_BOOTSTRAP_NODE " ]] && update_variable "Enter the address of a main Denaro node to sync with" "DENARO_BOOTSTRAP_NODE" $update_missing_vars $show_current_vars
-
+    [[ " ${missing_vars[*]} " =~ " LOG_LEVEL " ]] && update_variable "Enter the log level for the Denaro node (DEBUG, INFO, WARNING, ERROR, CRITICAL)" "LOG_LEVEL" $update_missing_vars $show_current_vars
+    [[ " ${missing_vars[*]} " =~ " LOG_CONSOLE_HIGHLIGHTING " ]] && update_variable "Enable log highlighting? (True/False)" "LOG_CONSOLE_HIGHLIGHTING" $update_missing_vars $show_current_vars
+    
     local new_db_user=$(read_env_variable "POSTGRES_USER" | sha256sum | cut -d' ' -f1)
     local new_db_pass=$(read_env_variable "POSTGRES_PASSWORD" | sha256sum | cut -d' ' -f1)
     local new_db_name=$(read_env_variable "DENARO_DATABASE_NAME" | sha256sum | cut -d' ' -f1)
@@ -549,7 +554,7 @@ setup_venv() {
             echo "It provides an isolated space for project dependencies."
             #echo ""
             while true; do
-                read -p "Do you want to create a Python virtual environment? (Y/N): " create_venv
+                read -p "Do you want to create a Python virtual environment? (y/n): " create_venv
                 case "$create_venv" in
                     [Yy] )
                         echo ""
@@ -563,7 +568,7 @@ setup_venv() {
                         echo "Skipped..."
                         break;;
                     * )
-                        echo "Invalid input. Please enter 'Y' or 'N'."
+                        echo "Invalid input. Please enter 'y' or 'n'."
                         echo ""
                 esac
             done
@@ -583,7 +588,7 @@ activate_venv() {
             source $VENV_DIR/bin/activate
         else            
             while true; do
-                read -p "Do you want to activate it? (Y/N): " activate_venv
+                read -p "Do you want to activate it? (y/n): " activate_venv
                 case "$activate_venv" in
                     [Yy] )
                         source $VENV_DIR/bin/activate
@@ -595,7 +600,7 @@ activate_venv() {
                         echo "Skipped..."
                         break;;
                     * )
-                        echo "Invalid input. Please enter 'Y' or 'N'."
+                        echo "Invalid input. Please enter 'y' or 'n'."
                         echo ""
                 esac
             done
@@ -642,11 +647,11 @@ print(str(packages))
     # Skip the first prompt if SKIP_PROMPTS is true
     if ! $SKIP_PROMPTS; then
         while true; do
-            read -p "Do you want to install the missing Python packages? (Y/N): " install_req
+            read -p "Do you want to install the missing Python packages? (y/n): " install_req
             case "$install_req" in
                 [Yy] ) break;;
                 [Nn] ) echo ""; echo "Cancelled..."; exit 1;;
-                * ) echo "Invalid input. Please enter 'Y' or 'N'."; echo ""; continue;;
+                * ) echo "Invalid input. Please enter 'y' or 'n'."; echo ""; continue;;
             esac
         done
     fi
@@ -657,11 +662,11 @@ print(str(packages))
         echo "Warning: You are not currently in a virtual environment!"
         echo "Installing globally can affect system-wide Python packages and cause dependency conflicts."
         while true; do
-            read -p "Are you sure you want to continue? (Y/N): " confirm_global_install
+            read -p "Are you sure you want to continue? (y/n): " confirm_global_install
             case "$confirm_global_install" in
                 [Yy] ) break;;
                 [Nn] ) echo ""; echo "Cancelled..."; exit 1;;
-                * ) echo "Invalid input. Please enter 'Y' or 'N'."; echo ""; continue;;
+                * ) echo "Invalid input. Please enter 'y' or 'n'."; echo ""; continue;;
             esac
         done
     fi
@@ -694,12 +699,12 @@ echo "Ready to start the Denaro node."
 validate_start_node_response() {
     while true; do
         # Prompt the user for input
-        read -p "Do you want to start the Denaro node now? (Y/N): " start_node
+        read -p "Do you want to start the Denaro node now? (y/n): " start_node
         # Check if the response is either 'y' or 'n' (case-insensitive)
         if [[ "$start_node" =~ ^[YyNn]$ ]]; then
             break  # Exit the loop if the input is valid
         else
-            echo "Invalid input. Please enter 'Y' or 'N'."  # Prompt for valid input
+            echo "Invalid input. Please enter 'y' or 'n'."  # Prompt for valid input
             echo ""
         fi
     done
@@ -711,7 +716,7 @@ start_node(){
     echo "Starting Denaro node on http://$DENARO_NODE_HOST:$DENARO_NODE_PORT..."
     echo "Press Ctrl+C to exit."
     echo ""
-    uvicorn denaro.node.main:app --host $DENARO_NODE_HOST --port $DENARO_NODE_PORT || { echo "Failed to start Denaro Node"; exit 1; }
+    python3 run_node.py || { echo "Failed to start Denaro Node"; exit 1; }
 }
 
 if $SKIP_PROMPTS; then

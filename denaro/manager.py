@@ -14,8 +14,15 @@ from typing import Tuple, List, Union
 import asyncio
 
 from . import Database
-from .constants import ENDIAN, MAX_BLOCK_SIZE_HEX, START_DIFFICULTY, BLOCK_TIME, BLOCKS_PER_ADJUSTMENT
+
+from .constants import (
+    ENDIAN, MAX_BLOCK_SIZE_HEX, START_DIFFICULTY,
+    BLOCK_TIME, BLOCKS_PER_ADJUSTMENT, INITIAL_REWARD,
+    HALVING_INTERVAL, MAX_HALVINGS, LOG_INCLUDE_BLOCK_SYNC_MESSAGES
+)
+
 from .helpers import sha256, timestamp, bytes_to_string, string_to_bytes
+from .logger import get_logger
 from .transactions import CoinbaseTransaction, Transaction
 
 from .consensus import (
@@ -25,6 +32,7 @@ from .consensus import (
     get_consensus_info
 )
 
+logger = get_logger(__name__)
 
 # ============================================================================
 # LEGACY DIFFICULTY FUNCTIONS (for Genesis consensus)
@@ -99,13 +107,12 @@ async def calculate_difficulty() -> Tuple[Decimal, dict]:
         legacy_hashrate_func=difficulty_to_hashrate
     )
     
-    print(f"\nDifficulty Adjustment at block {block_id} "
-          f"(Consensus: {rules.version.name}):")
-    print(f"  Time Elapsed: {time_elapsed}s for {BLOCKS_PER_ADJUSTMENT} blocks")
-    print(f"  Average Block Time: {avg_block_time:.2f}s (Target: {BLOCK_TIME}s)")
-    print(f"  Adjustment Ratio: {ratio:.4f}")
-    print(f"  Old Difficulty: {last_block['difficulty']} -> "
-          f"New Difficulty: {new_difficulty}\n")
+    logger.info(f"╔> Difficulty Adjustment at block: {block_id}")
+    logger.info(f"╠> Time Elapsed: {time_elapsed}s for {BLOCKS_PER_ADJUSTMENT} blocks")
+    logger.info(f"╠> Average Block Time: {avg_block_time:.2f}s (Target: {BLOCK_TIME}s)")
+    logger.info(f"╠> Adjustment Ratio: {ratio:.4f}")
+    logger.info(f"╠> Old Difficulty: {last_block['difficulty']} -> New Difficulty: {new_difficulty}")
+    logger.info(f"╚> Consensus Version: {rules.version.name}")
 
     return new_difficulty, last_block
 
@@ -182,11 +189,6 @@ def get_block_reward(block_number: int) -> Decimal:
     - Total Supply: 33,554,432 (2^25) DEN
     - Emission Lifespan: ~160 years (64 halvings)
     """
-    # --- Canonical Monetary Policy Parameters ---
-    INITIAL_REWARD = Decimal(64)
-    HALVING_INTERVAL = 262144
-    MAX_HALVINGS = 64
-
     # The first block is #1. We use (block_number - 1) to ensure the first
     # halving occurs precisely at block 262,144.
     if block_number <= 0:
@@ -256,7 +258,7 @@ async def clear_pending_transactions(transactions=None):
         if to_remove:
             for tx_hash in to_remove:
                 await database.remove_pending_transaction(tx_hash)
-                print(f'Removed conflicting transaction: {tx_hash}')
+                logger.debug(f'Removed conflicting transaction: {tx_hash}')
             
             transactions = await database.get_pending_transactions_limit(
                 hex_only=True
@@ -282,7 +284,7 @@ async def clear_pending_transactions(transactions=None):
         break
     
     if iteration >= max_iterations:
-        print(f"Warning: Transaction clearing hit iteration limit")
+        logger.warning("Transaction clearing hit iteration limit")
 
 
 # ============================================================================
@@ -337,7 +339,7 @@ async def check_block(block_content: str, transactions: List[Transaction], minin
     """
     # Early size validation (soft fork - all versions)
     if len(block_content) > MAX_BLOCK_SIZE_HEX:
-        print(f"Block rejected: content exceeds {MAX_BLOCK_SIZE_HEX} hex chars")
+        logger.warning(f"Block rejected: content exceeds {MAX_BLOCK_SIZE_HEX} hex chars")
         return False
 
     # --- PARSE BLOCK CONTENT EARLY ---
@@ -360,11 +362,11 @@ async def check_block(block_content: str, transactions: List[Transaction], minin
             is_genesis = True
         else:
             # Miner submitted a block that doesn't connect to their provided context.
-            print(f"Block rejected: Miner submitted block with unknown previous hash '{previous_hash}'")
+            logger.warning(f"Block rejected: Miner submitted block with unknown previous hash '{previous_hash}'")
             return False
     else:
         # A block from sync (no mining_info) whose predecessor is not found is an orphan.
-        print(f"Block rejected: Sync block has unknown previous hash '{previous_hash}'")
+        logger.warning(f"Block rejected: Sync block has unknown previous hash '{previous_hash}'")
         return False
 
     # --- ACCURATE DIFFICULTY CALCULATION ---
@@ -378,7 +380,7 @@ async def check_block(block_content: str, transactions: List[Transaction], minin
             first_block_of_period = await database.get_block_by_id(start_period_id)
             
             if not first_block_of_period:
-                 print(f"CRITICAL: Could not find block {start_period_id} for difficulty calc at height {block_no}")
+                 logger.error(f"Could not find block {start_period_id} for difficulty calc at height {block_no}")
                  return False
 
             time_elapsed = last_block_for_validation['timestamp'] - first_block_of_period['timestamp']
@@ -398,8 +400,8 @@ async def check_block(block_content: str, transactions: List[Transaction], minin
 
     # --- CONSENSUS CHECK: DIFFICULTY ---
     if content_difficulty != expected_difficulty:
-        print(f"Block {block_no} rejected: Difficulty mismatch. "
-              f"Expected: {expected_difficulty}, Got: {content_difficulty}")
+        logger.warning(f"Block {block_no} rejected: Difficulty mismatch. "
+                       f"Expected: {expected_difficulty}, Got: {content_difficulty}")
         return False
         
     rules = CONSENSUS_ENGINE.get_rules(block_no)
@@ -412,7 +414,7 @@ async def check_block(block_content: str, transactions: List[Transaction], minin
         _, pow_context_block = mining_info
 
     if not await check_block_is_valid(block_content, content_difficulty, pow_context_block):
-        print(f"Block {block_no} failed PoW validation")
+        logger.warning(f"Block {block_no} failed PoW validation")
         return False
 
     # --- CONSENSUS CHECK: FIELD RANGES (SOFT FORK) ---
@@ -443,7 +445,7 @@ async def check_block(block_content: str, transactions: List[Transaction], minin
         return False
     
     if get_transactions_size(regular_transactions) > MAX_BLOCK_SIZE_HEX:
-        print(f"Block {block_no} total transaction size too large")
+        logger.warning(f"Block {block_no} total transaction size too large")
         return False
 
     if regular_transactions:
@@ -453,27 +455,29 @@ async def check_block(block_content: str, transactions: List[Transaction], minin
         ], [])
         
         if len(set(check_inputs)) != len(check_inputs):
-            print(f"Block {block_no} contains internal double-spend")
+            logger.warning(f"Block {block_no} contains internal double-spend")
             return False
         
         unspent_outputs = await database.get_unspent_outputs(check_inputs)
         if set(check_inputs) != set(unspent_outputs):
-            print(f"Block {block_no} attempts to spend non-existent or already spent output")
+            logger.warning(f"Block {block_no} attempts to spend non-existent or already spent output")
             return False
 
     for transaction in regular_transactions:
         if not await transaction.verify(check_double_spend=False):
-            print(f"Block {block_no} contains invalid transaction: {transaction.hash()}")
+            logger.warning(f"Block {block_no} contains invalid transaction: {transaction.hash()}")
             return False
 
     # --- CONSENSUS CHECK: MERKLE ROOT ---
     expected_merkle_root = rules.calculate_merkle_tree(regular_transactions)
     if merkle_tree != expected_merkle_root:
-        print(f"Block {block_no} Merkle root mismatch. "
-              f"Expected: {expected_merkle_root}, Got: {merkle_tree}")
+        logger.warning(f"Block {block_no} Merkle root mismatch. "
+                       f"Expected: {expected_merkle_root}, Got: {merkle_tree}")
         return False
-
-    print(f"Block {block_no} passed all checks (Consensus: {rules.version.name})")
+    
+    if LOG_INCLUDE_BLOCK_SYNC_MESSAGES:
+        logger.debug(f"Block {block_no} passed all checks (Consensus: {rules.version.name})")
+    
     return True
 
 # ============================================================================
@@ -537,13 +541,14 @@ async def create_block(block_content: str, transactions: List[Transaction], last
             await database.remove_pending_spent_outputs(regular_transactions)
 
     except Exception as e:
-        print(f'FATAL: Could not commit block {block_no} to database. '
-              f'Rolling back. Error: {e}')
+        logger.error(f'Could not commit block {block_no} to database. '
+                     f'Rolling back. Error: {e}')
         await database.delete_block(block_no)
         return False
 
-    print(f'Added block {block_no} with {len(regular_transactions)} transactions. '
-          f'Reward: {block_reward}, Fees: {fees}')
+    if LOG_INCLUDE_BLOCK_SYNC_MESSAGES:
+        logger.info(f'Added block {block_no} with {len(regular_transactions)} transactions. Reward: {block_reward}, Fees: {fees}')
+    
     await Manager.invalidate_difficulty()
     return True
 

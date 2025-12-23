@@ -10,7 +10,10 @@ from asyncpg import Connection, Pool, UndefinedColumnError, UndefinedTableError
 
 from .constants import MAX_BLOCK_SIZE_HEX, SMALLEST
 from .helpers import sha256, point_to_string, string_to_point, point_to_bytes, AddressFormat, normalize_block
+from .logger import get_logger
 from .transactions import Transaction, CoinbaseTransaction, TransactionInput
+
+logger = get_logger(__name__)
 
 dir_path = os.path.dirname(os.path.realpath(__file__))
 #OLD_BLOCKS_TRANSACTIONS_ORDER = pickledb.load(dir_path + '/old_block_transactions_order.json', True)
@@ -27,10 +30,10 @@ class Database:
     async def create(user='denaro', password='', database='denaro', host='127.0.0.1', ignore: bool = False):
         self = Database()
         self.pool = await asyncpg.create_pool(
-            user=user,
-            password=password,
-            database=database,
-            host=host,
+            user=str(user),
+            password=str(password),
+            database=str(database),
+            host=str(host),
             command_timeout=30,
             min_size=3
         )
@@ -48,16 +51,16 @@ class Database:
                 try:
                     await connection.fetchrow('SELECT * FROM pending_spent_outputs LIMIT 1')
                 except UndefinedTableError:
-                    print('Creating pending_spent_outputs table')
+                    logger.info('Creating pending_spent_outputs table')
                     await connection.execute("""CREATE TABLE IF NOT EXISTS pending_spent_outputs (
                         tx_hash CHAR(64) REFERENCES transactions(tx_hash) ON DELETE CASCADE,
                         index SMALLINT NOT NULL
                     )""")
-                    print('Retrieving pending transactions')
+                    logger.info('Retrieving pending transactions')
                     txs = await connection.fetch('SELECT tx_hex FROM pending_transactions')
-                    print('Adding pending transactions spent outputs')
+                    logger.info('Adding pending transactions spent outputs')
                     await self.add_transactions_pending_spent_outputs([await Transaction.from_hex(tx['tx_hex'], False) for tx in txs])
-                    print('Done.')
+                    logger.info('Done.')
                 res = await connection.fetchrow('SELECT outputs_addresses FROM transactions WHERE outputs_addresses IS NULL AND tx_hash = ANY(SELECT tx_hash FROM unspent_outputs);')
                 self.is_indexed = res is None
                 try:
@@ -464,7 +467,7 @@ class Database:
         for tx in txs:
             if tx['block_no'] != last_block_no:
                 last_block_no = tx['block_no']
-                print(f'{len(outputs)} utxos at block {last_block_no - 1}')
+                logger.debug(f'{len(outputs)} utxos at block {last_block_no - 1}')
             tx_hash = sha256(tx['tx_hex'])
             transaction = await Transaction.from_hex(tx['tx_hex'], check_signatures=False)
             if isinstance(transaction, Transaction):
@@ -594,7 +597,7 @@ class Database:
                 delta = 0
                 for i, tx_input in enumerate(tx.inputs):
                     if string_to_point(res['inputs_addresses'][i]) == public_key:
-                        print('getting related output for delta')
+                        logger.debug('getting related output for delta')
                         delta -= await tx_input.get_amount()
                 for tx_output in tx.outputs:
                     if tx_output.public_key == public_key:

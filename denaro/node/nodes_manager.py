@@ -10,23 +10,22 @@ from typing import Optional, List, Any
 import asyncio
 import ipaddress
 import socket
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urlencode
 
 import httpx
-from dotenv import dotenv_values
 
-from ..constants import MAX_BLOCK_SIZE_HEX
+from ..constants import (
+    ACTIVE_NODES_DELTA, MAX_PEERS_COUNT, DENARO_SELF_URL,
+    LOG_INCLUDE_REQUEST_CONTENT, LOG_INCLUDE_RESPONSE_CONTENT, LOG_MAX_PATH_LENGTH
+)
+
 from .identity import get_node_id, get_public_key_hex, sign_message, get_canonical_json_bytes
+from ..logger import get_logger
+
+logger = get_logger(__name__)
 
 # --- Constants ---
-ACTIVE_NODES_DELTA = 60 * 60 * 24 * 7  # 7 days
-MAX_PEERS_COUNT = 200
-
 path = dirname(os.path.realpath(__file__)) + '/nodes.json'
-config = dotenv_values(".env")
-
-DENARO_BOOTSTRAP_NODE_URL = config.get("DENARO_BOOTSTRAP_NODE", "")
-SELF_URL = config.get("DENARO_SELF_URL")
 
 class NodesManager:
     db_path = path
@@ -61,26 +60,116 @@ class NodesManager:
             json.dump({'peers': NodesManager.peers}, f, indent=4)
 
     @staticmethod
-    async def request(client: httpx.AsyncClient, url: str, method: str = 'GET', **kwargs):
+    async def request(client: httpx.AsyncClient, url: str, method: str = 'GET', signed: bool = False, node_id: Optional[str] = None, **kwargs):
         """
         A wrapper for making async HTTP requests.
         It now re-raises RequestError so the caller can handle unreachability,
         while gracefully handling other response errors.
         """
+        start_time = time.time()
+        
+        # Build the URL with params for logging
+        log_url = url
+        if 'params' in kwargs and kwargs['params']:
+            params_str = urlencode(kwargs['params'], doseq=True)
+            separator = '&' if '?' in url else '?'
+            log_url = f"{url}{separator}{params_str}"
+        
+        # Truncate very long URLs to prevent log spam
+        if len(log_url) > LOG_MAX_PATH_LENGTH:
+            log_url = log_url[:LOG_MAX_PATH_LENGTH] + "...[TRUNCATED]"
+        
+        signed_marker = " [SIGNED]" if signed else ""
+        
+        # Log request body if present and has content
+        body = None
+        if LOG_INCLUDE_REQUEST_CONTENT:
+            for body_key in ('content', 'content_body', 'data', 'json'):
+                if body_key not in kwargs:
+                    continue
+                
+                value = kwargs[body_key]
+                if value is None:
+                    continue
+                
+                # Normalize value: parse JSON strings once, keep other types as-is
+                parsed_value = None
+                if isinstance(value, str):
+                    if len(value) == 0:
+                        continue
+                    # Try to parse as JSON
+                    try:
+                        parsed_value = json.loads(value)
+                    except (json.JSONDecodeError, ValueError):
+                        parsed_value = value  # Not JSON, use string as-is
+                elif isinstance(value, (dict, list)):
+                    parsed_value = value
+                else:
+                    parsed_value = value
+                
+                # Skip empty collections
+                if isinstance(parsed_value, (dict, list)) and len(parsed_value) == 0:
+                    continue
+                
+                # Format the body nicely
+                if isinstance(parsed_value, (dict, list)):
+                    body = json.dumps(parsed_value, indent=2)
+                elif isinstance(parsed_value, str):
+                    body = parsed_value
+                else:
+                    body = str(parsed_value)
+                
+                body = f"\n\nOutgoing Request:\n\"{body}\"\n"
+                break
+            
+        logger.info(f"--> \"{method} {log_url} HTTP/1.1\"{signed_marker}{body if body else ''}")
+        
         try:
             response = await client.request(method, url, **kwargs)
+            process_time = time.time() - start_time
+            status_code = response.status_code
             
+            # Prevents 409 from being treated as an error
+            # It's a hint from the peer that we are out of sync
             if response.status_code != 409:
                 response.raise_for_status()
             
+            # Extract and format response body if present
+            response_body = None
+            if LOG_INCLUDE_RESPONSE_CONTENT:
+                try:
+                    response_text = response.text
+                    if response_text:
+                        try:
+                            parsed_value = json.loads(response_text)
+                            # Skip empty collections
+                            if isinstance(parsed_value, (dict, list)) and len(parsed_value) == 0:
+                                response_body = None
+                            else:
+                                # Format as pretty JSON
+                                response_body = json.dumps(parsed_value, indent=2)
+                        except (json.JSONDecodeError, ValueError):
+                            # Not JSON, use raw string
+                            if len(response_text) > 0:
+                                response_body = response_text
+                except Exception:
+                    # Silently fail response body extraction
+                    response_body = None
+            
+            response_body_log = f"\n\nIncoming Response:\n\"{response_body}\"\n" if response_body else ""
+            logger.info(f"<-- \"{method} {log_url} HTTP/1.1\" {status_code}⁢ ({process_time:.3f}s){response_body_log}")
             return response.json()
         
         except httpx.RequestError as e:
-            print(f"Network error during request to {url}: {e}")
+            process_time = time.time() - start_time
+            logger.warning(f"<-- \"{method} {log_url} HTTP/1.1\" NETWORK_ERROR ({process_time:.3f}s)")
             raise e
 
         except (json.JSONDecodeError, httpx.HTTPStatusError) as e:
-            print(f"Request to {url} failed with a non-network error: {e}")
+            process_time = time.time() - start_time
+            status_code = getattr(e, 'response', None)
+            status_code = status_code.status_code if status_code else ''
+            logger.warning(f"<-- \"{method} {log_url} HTTP/1.1\" {status_code}⁢ ERROR ({process_time:.3f}s): {e}")
             return None
 
     @staticmethod
@@ -93,7 +182,7 @@ class NodesManager:
     
         is_new = node_id not in NodesManager.peers
         if is_new and len(NodesManager.peers) >= MAX_PEERS_COUNT:
-            print("Peer limit reached, not adding new peer.")
+            logger.warning(f"Peer limit reached ({MAX_PEERS_COUNT}), new peer will not be added.")
             return False
     
         url_to_store = url.strip('/') if url else None
@@ -233,18 +322,18 @@ class NodeInterface:
                 headers[f'x-denaro-{key}'] = str(value)
         
         should_advertise = False
-        if SELF_URL:
-            if not await self.is_url_local(SELF_URL):
+        if DENARO_SELF_URL:
+            if not await self.is_url_local(DENARO_SELF_URL):
                 should_advertise = True
             elif await self.is_url_local(self.url):
                 should_advertise = True
 
         if should_advertise:
-            headers['x-peer-url'] = SELF_URL
-
-        return await NodesManager.request(
-            self.client, f'{self.url}/{path}', method=method, content=body_str, headers=headers
-        )
+            headers['x-peer-url'] = DENARO_SELF_URL
+        
+        full_url = f'{self.url}/{path}'
+        result = await NodesManager.request(self.client, full_url, method=method, content=body_str, headers=headers, signed=True)
+        return result
 
     async def is_url_local(self, url: str) -> bool:
         """Resolves a URL's hostname and returns True if the IP is private/local."""

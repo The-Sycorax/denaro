@@ -9,8 +9,11 @@ from . import TransactionInput, TransactionOutput
 from .coinbase_transaction import CoinbaseTransaction
 from ..constants import ENDIAN, SMALLEST, CURVE
 from ..helpers import point_to_string, bytes_to_string, sha256
+from ..logger import get_logger
 
 import struct
+
+logger = get_logger(__name__)
 
 #print = ic
 
@@ -123,28 +126,28 @@ class Transaction:
         checked_signatures = []
         for tx_input in self.inputs:
             if tx_input.signed is None:
-                print('not signed')
+                logger.warning('Transaction not signed')
                 return False
             await tx_input.get_public_key()
             signature = (tx_input.public_key, tx_input.signed)
             if signature in checked_signatures:
                 continue
             if not await tx_input.verify(tx_hex):
-                print('signature not valid')
+                logger.warning('Transaction signature not valid')
                 return False
             checked_signatures.append(signature)
         return True
 
     def _verify_outputs(self):
-        return (self.outputs or self.hash() == '915ddf143e14647ba1e04c44cf61e57084254c44cd4454318240f359a414065c') and all(tx_output.verify() for tx_output in self.outputs)
+        return self.outputs and all(tx_output.verify() for tx_output in self.outputs)
 
     async def verify(self, check_double_spend: bool = True) -> bool:
         if check_double_spend and not self._verify_double_spend_same_transaction():
-            print('double spend inside same transaction')
+            logger.warning('Transaction rejected: double spend inside same transaction')
             return False
 
         if check_double_spend and not await self.verify_double_spend():
-            print('double spend')
+            logger.warning('Transaction rejected: double spend')
             return False
 
         await self._fill_transaction_inputs()
@@ -153,11 +156,11 @@ class Transaction:
             return False
 
         if not self._verify_outputs():
-            print('invalid outputs')
+            logger.warning('Transaction rejected: invalid outputs')
             return False
 
         if await self.get_fees() < 0:
-            print('We are not the Federal Reserve')
+            logger.warning('Transaction rejected: negative fees (We are not the Federal Reserve)')
             return False
 
         return True

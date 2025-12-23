@@ -3,10 +3,11 @@
 import os
 import hashlib
 import json # Import json for canonical serialization
-from fastecdsa import keys, ecdsa, curve
+from fastecdsa import keys, ecdsa
+from denaro.constants import CURVE
+from ..logger import get_logger
 
-# Use the P256 curve (also known as secp256r1)
-SELECTED_CURVE = curve.P256
+logger = get_logger(__name__)
 
 # Define the path for the node's private key file
 KEY_FILE_PATH = os.path.join(os.path.dirname(__file__), 'node_key.priv')
@@ -18,13 +19,13 @@ _node_id: str = None
 
 def generate_new_key():
     """Generates a new P256 private key and its corresponding public key."""
-    return keys.gen_keypair(SELECTED_CURVE)
+    return keys.gen_keypair(CURVE)
 
 def save_key(key: int):
     """Saves the private key (an integer) to the key file."""
     with open(KEY_FILE_PATH, 'w') as f:
         f.write(str(key))
-    print(f"New node identity created and saved to {KEY_FILE_PATH}")
+    logger.info(f"New node identity created and saved to {KEY_FILE_PATH}")
 
 def load_key() -> int:
     """Loads the private key from the key file."""
@@ -43,19 +44,19 @@ def initialize_identity():
     
     priv_key_int = load_key()
     if priv_key_int is None:
-        print("No node key found. Generating a new identity...")
+        logger.info("No node key found. Generating a new identity...")
         priv_key_int, _ = generate_new_key()
         save_key(priv_key_int)
     
     _private_key = priv_key_int
-    _public_key = keys.get_public_key(_private_key, SELECTED_CURVE)
+    _public_key = keys.get_public_key(_private_key, CURVE)
     
     # The Node ID is the SHA256 hash of the public key bytes (uncompressed format)
     # fastecdsa uses X and Y coordinates for the public key. We'll concatenate them.
     pubkey_bytes = _public_key.x.to_bytes(32, 'big') + _public_key.y.to_bytes(32, 'big')
     _node_id = hashlib.sha256(pubkey_bytes).hexdigest()
     
-    print(f"Node Identity Initialized. Node ID: {_node_id}")
+    logger.info(f"Node Identity Initialized. Node ID: {_node_id}")
 
 def get_private_key() -> int:
     """Returns the loaded private key as an integer."""
@@ -76,7 +77,7 @@ def sign_message(message: bytes) -> str:
         raise Exception("Identity not initialized. Cannot sign message.")
     
     # fastecdsa.ecdsa.sign returns a tuple (r, s)
-    r, s = ecdsa.sign(message, _private_key, curve=SELECTED_CURVE, hashfunc=hashlib.sha256)
+    r, s = ecdsa.sign(message, _private_key, curve=CURVE, hashfunc=hashlib.sha256)
     
     # We'll concatenate r and s to form the signature
     return r.to_bytes(32, 'big').hex() + s.to_bytes(32, 'big').hex()
@@ -88,7 +89,7 @@ def verify_signature(pubkey_hex: str, signature_hex: str, message: bytes) -> boo
         pubkey_bytes = bytes.fromhex(pubkey_hex)
         x = int.from_bytes(pubkey_bytes[:32], 'big')
         y = int.from_bytes(pubkey_bytes[32:], 'big')
-        pub_key = keys.Point(x, y, curve=SELECTED_CURVE)
+        pub_key = keys.Point(x, y, curve=CURVE)
 
         # Reconstruct the signature from the hex string
         signature_bytes = bytes.fromhex(signature_hex)
@@ -96,7 +97,7 @@ def verify_signature(pubkey_hex: str, signature_hex: str, message: bytes) -> boo
         s = int.from_bytes(signature_bytes[32:], 'big')
 
         # The verify function returns True on success, raises an exception on failure
-        return ecdsa.verify((r, s), message, pub_key, curve=SELECTED_CURVE, hashfunc=hashlib.sha256)
+        return ecdsa.verify((r, s), message, pub_key, curve=CURVE, hashfunc=hashlib.sha256)
     except Exception:
         # Catch any errors during parsing or verification
         return False

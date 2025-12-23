@@ -4,7 +4,6 @@ import asyncio
 from asyncio import gather, Lock
 from collections import deque, defaultdict
 import os
-from dotenv import dotenv_values
 import re
 import json
 from decimal import Decimal
@@ -31,13 +30,14 @@ from icecream import ic
 from starlette.background import BackgroundTasks, BackgroundTask
 from starlette.middleware.cors import CORSMiddleware
 from starlette.requests import Request
-from starlette.responses import JSONResponse
+from starlette.responses import JSONResponse, Response
 
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 
 from denaro.helpers import timestamp, sha256, transaction_to_json
+from denaro.logger import get_logger
 
 from denaro.manager import (
     create_block, get_difficulty, Manager, get_transactions_merkle_tree, 
@@ -48,11 +48,22 @@ from denaro.node.nodes_manager import NodesManager, NodeInterface
 from denaro.node.utils import ip_is_local
 from denaro.transactions import Transaction, CoinbaseTransaction
 from denaro import Database
-from denaro.constants import NODE_VERSION, ENDIAN
+from denaro.constants import (
+    MAX_MINING_CANDIDATES, NODE_VERSION, MAX_BLOCKS_PER_SUBMISSION,
+    MAX_BLOCK_CONTENT_SIZE, MAX_PEERS, MAX_CONCURRENT_SYNCS,
+    MAX_TX_FETCH_LIMIT, MAX_MEMPOOL_SIZE, CONNECTION_TIMEOUT,
+    MAX_BATCH_BYTES, VALID_HEX_PATTERN, VALID_ADDRESS_PATTERN,
+    DENARO_BOOTSTRAP_NODE, DENARO_SELF_URL, POSTGRES_USER,
+    POSTGRES_PASSWORD, DENARO_DATABASE_NAME, DENARO_DATABASE_HOST,
+    MAX_TX_DATA_SIZE, DENARO_NODE_HOST, DENARO_NODE_PORT, MAX_REORG_DEPTH,
+    LOG_INCLUDE_REQUEST_CONTENT, LOG_INCLUDE_RESPONSE_CONTENT, LOG_MAX_PATH_LENGTH
+)
 from denaro.node.identity import (
     initialize_identity, get_node_id, get_public_key_hex, 
     verify_signature, get_canonical_json_bytes, sign_message
 )
+
+logger = get_logger(__name__)
 
 # ============================================================================
 # SECURITY COMPONENTS
@@ -188,7 +199,7 @@ class HandshakeChallengeManager:
 
 class BoundedPeerSyncTracker:
     """Track peer sync operations with size limits"""
-    def __init__(self, max_peers: int = 100):
+    def __init__(self, max_peers: int = MAX_PEERS):
         self._peers_in_sync: Set[str] = set()
         self._sync_timestamps: Dict[str, float] = {}
         self._lock = asyncio.Lock()
@@ -225,7 +236,7 @@ class BoundedPeerSyncTracker:
 
 class SyncStateManager:
     """Thread-safe synchronization state management"""
-    def __init__(self, max_concurrent_syncs: int = 3):
+    def __init__(self, max_concurrent_syncs: int = MAX_CONCURRENT_SYNCS):
         self.is_syncing = False
         self.active_sync_count = 0
         self.max_concurrent_syncs = max_concurrent_syncs
@@ -307,27 +318,22 @@ class InputValidator:
         
     @staticmethod
     def validate_address(address: str) -> bool:
-        """Validate address format"""
+        """Validate address format using canonical pattern"""
         if not address:
             return False
-            
-        # Adjust pattern based on your address format
+
         if len(address) < 40 or len(address) > 128:
             return False
-            
-        # Check valid characters (alphanumeric)
-        if not re.match(r'^[0-9a-zA-Z]+$', address):
-            return False
-            
-        return True
+
+        return bool(VALID_ADDRESS_PATTERN.match(address))
         
     @staticmethod
-    def validate_transaction_data(tx_hex: str, max_size: int = 2_075_000) -> Tuple[bool, Optional[str]]:
+    def validate_transaction_data(tx_hex: str) -> Tuple[bool, Optional[str]]:
         """Comprehensive transaction validation"""
         if not tx_hex:
             return False, "Empty transaction"
             
-        if len(tx_hex) > max_size:
+        if len(tx_hex) > 2_075_000:
             return False, "Transaction too large"
             
         if not InputValidator.validate_hex(tx_hex):
@@ -409,11 +415,11 @@ class AuthenticatedRequestValidator:
             
             if not verify_signature(pubkey, signature, canonical_bytes):
                 # The reconstructed signature does not match.
-                print(f"Signature verification failed for peer {node_id[:10]}.")
+                logger.error(f"Signature verification failed for peer {node_id}.")
                 return None
 
         except Exception as e:
-            print(f"Error during signature validation: {e}")
+            logger.error(f"Error during signature validation: {e}")
             return None
 
         # All checks passed. Store the nonce and return the verified node_id.
@@ -682,8 +688,8 @@ class SecureNodeComponents:
         
         # Managers
         self.handshake_manager = HandshakeChallengeManager()
-        self.peer_sync_tracker = BoundedPeerSyncTracker(max_peers=100)
-        self.sync_state_manager = SyncStateManager(max_concurrent_syncs=3)
+        self.peer_sync_tracker = BoundedPeerSyncTracker(max_peers=MAX_PEERS)
+        self.sync_state_manager = SyncStateManager(max_concurrent_syncs=MAX_CONCURRENT_SYNCS)
         
         # Validation
         self.input_validator = InputValidator()
@@ -728,7 +734,7 @@ class SecureNodeComponents:
             # Check security thresholds
             alerts = await self.security_monitor.check_thresholds()
             if alerts:
-                print(f"SECURITY ALERTS: {alerts}")
+                logger.warning(f"SECURITY ALERTS: {alerts}")
 
 # ============================================================================
 # RATE LIMITING KEY FUNCTION
@@ -753,27 +759,14 @@ def rate_limit_key_func(request: Request) -> str:
 # APPLICATION SETUP
 # ============================================================================
 
-# Security constants
-#MAX_TX_HEX_SIZE = 2_075_000
-MAX_BLOCKS_PER_SUBMISSION = 512
-MAX_BLOCK_CONTENT_SIZE = 4_194_304  # 4MB in HEX format, 2MB in raw bytes
-MAX_PEERS = 64  # Maximum number of peers to store
-MAX_CONCURRENT_SYNCS = 3  # Maximum concurrent sync operations
-#MAX_PROPAGATION_TASKS = 50  # Maximum concurrent propagation tasks
-MAX_TX_FETCH_LIMIT = 512
-MAX_PENDING_POOL_SIZE = 10000  # Maximum transactions in mempool
-CONNECTION_TIMEOUT = 10.0
-#HANDSHAKE_REPLAY_WINDOW = 300  # 5 minutes replay protection window
-
 db: Database = None
 self_node_id: str = None
 self_is_public: bool = False 
-config = dotenv_values(".env")
-self_url = config.get("DENARO_SELF_URL") 
-DENARO_BOOTSTRAP_NODE_URL = config.get("DENARO_BOOTSTRAP_NODE")
+
+app_servers = [{"url": str(DENARO_SELF_URL)}] if DENARO_SELF_URL else []
+app = FastAPI(servers=app_servers, title="Denaro Node", description="Full node for the Denaro blockchain.", version=NODE_VERSION)
 
 limiter = Limiter(key_func=rate_limit_key_func)
-app = FastAPI(servers=[{"url": self_url, "description": "Denaro Node"}])
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
@@ -796,41 +789,152 @@ http_client: Optional[httpx.AsyncClient] = None
 LAST_PENDING_TRANSACTIONS_CLEAN = [0]
 block_processing_lock = asyncio.Lock()
 
-# Input validation patterns
-VALID_HEX_PATTERN = re.compile(r'^[0-9a-fA-F]+$')
-VALID_ADDRESS_PATTERN = re.compile(r'^[DE][1-9A-HJ-NP-Za-km-z]{44}$')
-
-
 # ============================================================================
 # HELPER FUNCTIONS
 # ============================================================================
+# Request logging middleware
+@app.middleware("http")
+async def log_requests(request: Request, call_next):
+    """Log all incoming HTTP requests using the logger."""
+    import time
+    start_time = time.time()
+    
+    # Get client IP
+    client_ip = request.client.host if request.client else "unknown"
+    
+    # Build request path with query params
+    method = request.method
+    path = request.url.path
+    query_params = str(request.query_params) if request.query_params else ""
+    full_path = f"{path}?{query_params}" if query_params else path
+    
+    # Truncate very long paths to prevent log spam from malicious requests
+    if len(full_path) > LOG_MAX_PATH_LENGTH:
+        full_path = full_path[:LOG_MAX_PATH_LENGTH] + "...[TRUNCATED]"
+    
+    # Extract and format request body if present
+    body = None
+    body_bytes = None
+    if LOG_INCLUDE_REQUEST_CONTENT:
+        try:
+            # Check if request has a body
+            content_length = request.headers.get('content-length')
+            
+            if content_length and int(content_length) > 0:
+                # Read body bytes (this consumes the body, so we'll restore it)
+                body_bytes = await request.body()
+                
+                if body_bytes:
+                    # Try to parse as JSON
+                    try:
+                        body_str = body_bytes.decode('utf-8')
+                        parsed_value = json.loads(body_str)
+                        
+                        # Skip empty collections
+                        if isinstance(parsed_value, (dict, list)) and len(parsed_value) == 0:
+                            body = None
+                        else:
+                            # Format as pretty JSON
+                            body = json.dumps(parsed_value, indent=2)
+                    except (json.JSONDecodeError, ValueError, UnicodeDecodeError):
+                        # Not JSON or not valid UTF-8, use raw string
+                        body_str = body_bytes.decode('utf-8', errors='replace')
+                        if len(body_str) > 0:
+                            body = body_str
+                        else:
+                            body = None
+        except Exception:
+            # Silently fail body extraction to not break request processing
+            body = None
+            body_bytes = None
+    
+    # Restore request body if we read it (so endpoints can still access it)
+    if body_bytes is not None:
+        async def receive():
+            return {'type': 'http.request', 'body': body_bytes}
+        request._receive = receive
+    
+    # Log incoming request
+    request_body_log = f"\n\nIncoming Request:\n{body}\n" if body else ""
+    logger.info(f"<-- {client_ip} - \"{method} {full_path} HTTP/1.1\"{request_body_log}")
+    
+    # Process request
+    try:
+        response = await call_next(request)
+        process_time = time.time() - start_time
+        status_code = response.status_code
+        
+        # Extract and format response body if present
+        response_body = None
+        if LOG_INCLUDE_RESPONSE_CONTENT and hasattr(response, 'body_iterator'):
+            try:
+                # Read response body
+                response_body_bytes = b""
+                async for chunk in response.body_iterator:
+                    response_body_bytes += chunk
+                
+                # Always recreate response with the body so client still receives it
+                # (body_iterator is consumed after reading)
+                response = Response(
+                    content=response_body_bytes,
+                    status_code=status_code,
+                    headers=dict(response.headers),
+                    media_type=response.media_type
+                )
+                
+                # Format body for logging
+                if response_body_bytes:
+                    try:
+                        response_body_str = response_body_bytes.decode('utf-8')
+                        parsed_value = json.loads(response_body_str)
+                        
+                        # Skip empty collections
+                        if isinstance(parsed_value, (dict, list)) and len(parsed_value) == 0:
+                            response_body = None
+                        else:
+                            # Format as pretty JSON
+                            response_body = json.dumps(parsed_value, indent=2)
+                    except (json.JSONDecodeError, ValueError, UnicodeDecodeError):
+                        # Not JSON or not valid UTF-8, use raw string
+                        response_body_str = response_body_bytes.decode('utf-8', errors='replace')
+                        if len(response_body_str) > 0:
+                            response_body = response_body_str
+                        else:
+                            response_body = None
+            except Exception:
+                # Silently fail response body extraction, return original response
+                response_body = None
+        
+        # Log response
+        response_body_log = f"\n\nOutgoing Response:\n{response_body}\n" if response_body else ""
+        logger.info(f"--> {client_ip} - \"{method} {full_path} HTTP/1.1\" {status_code}⁢ ({process_time:.3f}s){response_body_log}")
+        
+        return response
+    except Exception as e:
+        process_time = time.time() - start_time
+        logger.error(f"--> {client_ip} - \"{method} {full_path} HTTP/1.1\" ERROR ({process_time:.3f}s){request_body_log}: {e}")
+        raise
 
 async def validate_url_for_connection(url: str) -> bool:
     """Validate URL is safe for outbound connections with DNS rebinding protection"""
     if not url:
         return False
-        
     is_valid, resolved_ip = await security.dns_client.validate_and_resolve(url)
     if not is_valid:
-        return False
-        
+        return False 
     try:
         ip_obj = ipaddress.ip_address(resolved_ip)
-        
         # Block connections to loopback, link-local, or reserved IPs
         if not ip_obj.is_global and not ip_obj.is_private:
-             print(f"Blocked connection to reserved/loopback/link-local IP: {resolved_ip}")
+             logger.warning(f"Blocked connection to reserved/loopback/link-local IP: {resolved_ip}")
              return False
-
         # If the node itself is public, it must not initiate connections to private networks
         if self_is_public and ip_obj.is_private:
-            print(f"Public node blocked connection attempt to private IP: {resolved_ip}")
+            logger.warning(f"Public node blocked connection attempt to private IP: {resolved_ip}")
             return False
-            
         return True
-        
     except Exception as e:
-        print(f"URL validation failed for {url}: {e}")
+        logger.error(f"Unexpected error while validating Address: {url} - {e}")
         return False
 
 
@@ -860,7 +964,6 @@ async def propagate(path: str, data: dict, ignore_node_id: str = None, db: Datab
             
             async def communication_task(peer_info: dict, p: str, d: dict):
                 peer_id = peer_info.get('node_id', 'Unknown')
-                peer_id_short = peer_id[:10]
                 peer_url = peer_info.get('url')
 
                 try:
@@ -873,7 +976,7 @@ async def propagate(path: str, data: dict, ignore_node_id: str = None, db: Datab
                     
                     if response and response.get('error') == 'sync_required':
                         if not db:
-                            print(f"WARNING: Received sync_required from {peer_id_short} but no DB connection available.")
+                            logger.warning(f"Received sync_required from {peer_id} but no DB connection available.")
                             return
 
                         # Use secure peer sync tracker
@@ -887,10 +990,9 @@ async def propagate(path: str, data: dict, ignore_node_id: str = None, db: Datab
 
                     # Track successful propagation
                     await security.reputation_manager.record_good_behavior(peer_id)
-                    print(f'propagate response from {peer_id_short}: {response}')
+                    logger.debug(f'propagate response from {peer_id}: {response}')
                 
                 except httpx.RequestError:
-                    # --- THIS IS THE NEW LOGIC ---
                     # The peer is unreachable (timeout, connection refused, etc.).
                     # This is a network failure, not a protocol violation. Remove them non-punitively.
                     await handle_unreachable_peer(peer_id, peer_url, "propagation")
@@ -900,7 +1002,7 @@ async def propagate(path: str, data: dict, ignore_node_id: str = None, db: Datab
                     await security.reputation_manager.record_violation(
                         peer_id, 'propagation_failure', severity=1, details=str(e)
                     )
-                    print(f'propagate EXCEPTION from {peer_id_short}: {e}')
+                    logger.warning(f'propagate EXCEPTION from {peer_id}: {e}')
 
             tasks.append(communication_task(peer, path, data))
 
@@ -910,30 +1012,27 @@ async def propagate(path: str, data: dict, ignore_node_id: str = None, db: Datab
 async def _push_sync_to_peer(peer_info: dict, start_block: int, db_conn: Database, trigger_data: dict):
     """Push missing blocks to a lagging peer with proper resource management."""
     peer_id = peer_info.get('node_id', 'Unknown')
-    peer_id_short = peer_id[:10]
     peer_url = peer_info.get('url')
     sync_successful = False
-    
     try:
         target_block_id = trigger_data.get('id')
         if target_block_id is None:
-            print(f"[PUSH-SYNC] Aborted for {peer_id_short}: No target block ID in trigger data.")
+            logger.warning(f"[PUSH-SYNC] Aborted for {peer_id}: No target block ID in trigger data.")
             return
 
-        print(f"[PUSH-SYNC] Starting for {peer_id_short}. They need blocks from {start_block} up to (but not including) {target_block_id}.")
+        logger.info(f"[PUSH-SYNC] Starting for {peer_id}. They need blocks from {start_block} up to (but not including) {target_block_id}.")
         
         # Pass the db object to the interface
         node_interface = NodeInterface(peer_info['url'], client=http_client, db=db_conn)
         current_block_to_send = start_block
-        MAX_BATCH_BYTES = 20 * 1024 * 1024
 
         while current_block_to_send < target_block_id:
             remaining_blocks = target_block_id - current_block_to_send
-            batch_size_limit = min(128, remaining_blocks)
+            batch_size_limit = min(MAX_REORG_DEPTH, remaining_blocks)
             
             structured_blocks_to_send = await db_conn.get_blocks(current_block_to_send, batch_size_limit)
             if not structured_blocks_to_send:
-                print(f"[PUSH-SYNC] to {peer_id_short} halted. Local DB has no more blocks in the required range.")
+                logger.warning(f"[PUSH-SYNC] to {peer_id} halted. Local DB has no more blocks in the required range.")
                 sync_successful = False
                 break
 
@@ -956,7 +1055,7 @@ async def _push_sync_to_peer(peer_info: dict, start_block: int, db_conn: Databas
                 current_batch_bytes += block_size_estimate
             
             if not payload_batch:
-                print(f"[PUSH-SYNC] Could not form a batch for {peer_id_short} without exceeding size limits. Halting.")
+                logger.warning(f"[PUSH-SYNC] Could not form a batch for {peer_id} without exceeding size limits. Halting.")
                 return
 
             response = await node_interface.submit_blocks(payload_batch)
@@ -964,28 +1063,28 @@ async def _push_sync_to_peer(peer_info: dict, start_block: int, db_conn: Databas
             if not response or not response.get('ok'):
                 error_msg = response.get('error', '')
                 if 'Block sequence out of order' in error_msg or 'sequence desynchronized' in error_msg:
-                    print(f"[PUSH-SYNC] to {peer_id_short} ceded. Peer's state changed, another node is likely already syncing them.")
+                    logger.info(f"[PUSH-SYNC] to {peer_id} ceded. Peer's state changed, another node is likely already syncing them.")
                 else:
-                    print(f"[PUSH-SYNC] to {peer_id_short} failed. Peer responded with an unexpected error: {response}")
+                    logger.warning(f"[PUSH-SYNC] to {peer_id} failed. Peer responded with an unexpected error: {response}")
                     await security.reputation_manager.record_violation(
                         peer_id, 'sync_rejection', severity=3
                     )
                 return
 
             batch_len = len(payload_batch)
-            print(f"[PUSH-SYNC] Peer {peer_id_short} accepted batch of {batch_len} blocks.")
+            logger.debug(f"[PUSH-SYNC] Peer {peer_id} accepted batch of {batch_len} blocks.")
             current_block_to_send += len(payload_batch)
             await asyncio.sleep(0.1)
 
         if current_block_to_send >= target_block_id:
-            print(f"[PUSH-SYNC] to {peer_id_short} complete. Sent all blocks up to {target_block_id - 1}.")
+            logger.info(f"[PUSH-SYNC] to {peer_id} complete. Sent all blocks up to {target_block_id - 1}.")
             sync_successful = True 
     
     except httpx.RequestError:
         await handle_unreachable_peer(peer_id, peer_url, "push-sync")
         
     except Exception as e:
-        print(f"Error during BULK push-sync to {peer_id_short}: {e}")
+        logger.error(f"Error during BULK push-sync to {peer_id}: {e}")
         traceback.print_exc()
         
     finally:
@@ -995,21 +1094,21 @@ async def _push_sync_to_peer(peer_info: dict, start_block: int, db_conn: Databas
         # Only attempt to resubmit if the trigger_data was a full block payload,
         # which we can check by looking for 'block_content'.
         if sync_successful and trigger_data and 'block_content' in trigger_data:
-            print(f"[PUSH-SYNC] Sync for {peer_id_short} complete. Retrying submission of triggering block {trigger_data.get('id')}...")
+            logger.info(f"[PUSH-SYNC] Sync for {peer_id} complete. Retrying submission of triggering block {trigger_data.get('id')}...")
             try:
                 # Recreate the interface to be safe within the finally block
                 final_interface = NodeInterface(peer_info['url'], client=http_client, db=db_conn)
                 final_response = await final_interface.submit_block(trigger_data)
-                print(f"[PUSH-SYNC] Final submission response for block {trigger_data.get('id')} from {peer_id_short}: {final_response}")
+                logger.debug(f"[PUSH-SYNC] Final submission response for block {trigger_data.get('id')} from {peer_id}: {final_response}")
             
             except httpx.RequestError:
                 await handle_unreachable_peer(peer_id, peer_url, "push-sync final submission")
 
             except Exception as e:
-                print(f"[PUSH-SYNC] Error during final submission for {peer_id_short}: {e}")
+                logger.error(f"[PUSH-SYNC] Error during final submission for {peer_id}: {e}")
         
 
-        print(f"Push-sync task for peer {peer_id_short} has finished.")
+        logger.debug(f"Push-sync task for peer {peer_id} has finished.")
 
 
 async def check_peer_and_sync(peer_info: dict):
@@ -1023,7 +1122,6 @@ async def check_peer_and_sync(peer_info: dict):
 
     peer_id = peer_info.get('node_id', 'Unknown')
     peer_url = peer_info.get('url')
-    peer_id_short = peer_id[:10]
     
     try:
         # Ensure the peer is connectable
@@ -1034,7 +1132,7 @@ async def check_peer_and_sync(peer_info: dict):
         remote_status_resp = await interface.get_status()
         
         if not (remote_status_resp and remote_status_resp.get('ok')):
-            print(f"Could not get status from peer {peer_id_short} during check.")
+            logger.warning(f"Could not get status from peer {peer_id} during check.")
             await security.reputation_manager.record_violation(
                 peer_id, 'status_unavailable', severity=1
             )
@@ -1044,7 +1142,7 @@ async def check_peer_and_sync(peer_info: dict):
         local_height = await db.get_next_block_id() - 1
 
         if remote_height > local_height:
-            print(f"Discovered longer chain on peer {peer_id_short} (Remote: {remote_height} > Local: {local_height}). Initiating sync.")
+            logger.info(f"Discovered longer chain on peer {peer_id} (Remote: {remote_height} > Local: {local_height}). Initiating sync.")
             # Trigger the main sync logic, targeting this specific peer
             await _sync_blockchain(node_id=peer_id)
         # If their chain is not longer, there's nothing to do.
@@ -1053,7 +1151,7 @@ async def check_peer_and_sync(peer_info: dict):
         await handle_unreachable_peer(peer_id, peer_url, "periodic status check")
 
     except Exception as e:
-        print(f"Error during status check with peer {peer_id_short}: {e}")
+        logger.error(f"Error during status check with peer {peer_id}: {e}")
 
 
 async def get_verified_sender(request: Request):
@@ -1070,9 +1168,9 @@ async def get_verified_sender(request: Request):
         })
         return None
     
-    verified_node_id = await security.auth_validator.validate_request(request)
+    peer_id = await security.auth_validator.validate_request(request)
     
-    if not verified_node_id:
+    if not peer_id:
         return None
 
     # 3. If it's a monitor request, stop here and return the ID.
@@ -1080,19 +1178,19 @@ async def get_verified_sender(request: Request):
     if is_monitor_request:
         if not node_id: # A monitor must still identify itself
             return None
-        #print(f"Verified monitor request from node {node_id[:10]}. Skipping peer list update.")
-        return verified_node_id
+        #print(f"Verified monitor request from node {node_id}. Skipping peer list update.")
+        return peer_id
 
     # 4. If it's a REGULAR peer request, proceed with the normal logic.
     peer_count = len(NodesManager.peers) if hasattr(NodesManager, 'peers') else 0
     if peer_count >= MAX_PEERS:
-        NodesManager.update_peer_last_seen(verified_node_id)
-        return verified_node_id
+        NodesManager.update_peer_last_seen(peer_id)
+        return peer_id
     
     peer_url = request.headers.get('x-peer-url')
     pubkey = request.headers.get('x-public-key')
     
-    is_unknown = NodesManager.get_peer(verified_node_id) is None
+    is_unknown = NodesManager.get_peer(peer_id) is None
     
     if is_unknown and pubkey:
         is_peer_public = False
@@ -1103,18 +1201,18 @@ async def get_verified_sender(request: Request):
                 url_to_store = peer_url
                 is_peer_public = not await is_url_local(peer_url)
             else:
-                print(f"Rejected peer URL {peer_url} due to security validation")
+                logger.warning(f"Rejected peer URL {peer_url} due to security validation")
                 await security.reputation_manager.record_violation(
-                    verified_node_id, 'invalid_url', severity=3
+                    peer_id, 'invalid_url', severity=3
                 )
         
-        if NodesManager.add_or_update_peer(verified_node_id, pubkey, url_to_store, is_peer_public):
-            print(f"Discovered new {'public' if is_peer_public else 'private'} peer {verified_node_id[:10]} from their incoming request.")
+        if NodesManager.add_or_update_peer(peer_id, pubkey, url_to_store, is_peer_public):
+            logger.info(f"Discovered new {'public' if is_peer_public else 'private'} peer {peer_id} from their incoming request.")
 
-    NodesManager.update_peer_last_seen(verified_node_id)
-    await security.reputation_manager.record_good_behavior(verified_node_id)
+    NodesManager.update_peer_last_seen(peer_id)
+    await security.reputation_manager.record_good_behavior(peer_id)
     
-    return verified_node_id
+    return peer_id
 
 
 async def do_handshake_with_peer(peer_url_to_connect: str):
@@ -1122,49 +1220,48 @@ async def do_handshake_with_peer(peer_url_to_connect: str):
     Performs a cryptographic handshake and state negotiation with a peer. This is the
     client-side of the handshake negotiation.
     """
-    peer_node_id = None
+    peer_id = None
 
-    if not peer_url_to_connect or peer_url_to_connect == self_url:
+    if not peer_url_to_connect or peer_url_to_connect == DENARO_SELF_URL:
         return
 
     if not await validate_url_for_connection(peer_url_to_connect):
-        print(f"Skipping handshake with unsafe URL: {peer_url_to_connect}")
+        logger.warning(f"Skipping handshake with unsafe URL: {peer_url_to_connect}")
         return
 
     if NodesManager.self_is_public and await is_url_local(peer_url_to_connect):
-        print(f"Public node skipping handshake attempt to private URL: {peer_url_to_connect}")
+        logger.debug(f"Public node skipping handshake attempt to private URL: {peer_url_to_connect}")
         return
 
-    print(f"Attempting handshake with {peer_url_to_connect}...")
+    logger.info(f"Attempting handshake with {peer_url_to_connect}")
     try:
         interface = NodeInterface(peer_url_to_connect, client=http_client, db=db)
         
         # 1. Get Challenge from peer (which includes their chain state)
         challenge_resp = await interface.handshake_challenge()
         if not (challenge_resp and challenge_resp.get('ok')):
-            print(f"Handshake failed: Did not receive challenge from {peer_url_to_connect}.")
+            logger.warning(f"Handshake failed: Did not receive challenge from {peer_url_to_connect}.")
             return
 
         challenge_data = challenge_resp['result']
         challenge = challenge_data.get('challenge')
-        peer_node_id = challenge_data.get('node_id')
+        peer_id = challenge_data.get('node_id')
         peer_pubkey = challenge_data.get('pubkey')
         peer_is_public = challenge_data.get('is_public')
         peer_advertised_url = challenge_data.get('url')
         peer_height = challenge_data.get('height', -1)
 
-        if not all([challenge, peer_node_id, peer_pubkey, peer_is_public is not None]):
-            print(f"Handshake failed: Incomplete challenge data from {peer_url_to_connect}.")
+        if not all([challenge, peer_id, peer_pubkey, peer_is_public is not None]):
+            logger.warning(f"Handshake failed: Incomplete challenge data from {peer_url_to_connect}.")
             return
-            
-        
+                   
         # Add or update the peer in our manager AS SOON as we have their info.
         # This makes them "known" before we attempt any sync logic.
         url_to_store = peer_advertised_url if peer_is_public and peer_advertised_url else peer_url_to_connect
-        if NodesManager.add_or_update_peer(peer_node_id, peer_pubkey, url_to_store, peer_is_public):
-            print(f"Handshake Phase 1: Discovered and added new {'public' if peer_is_public else 'private'} peer {peer_node_id[:10]}...")
+        if NodesManager.add_or_update_peer(peer_id, peer_pubkey, url_to_store, peer_is_public):
+            logger.info(f"Handshake Phase 1: Discovered and added new {'public' if peer_is_public else 'private'} peer {peer_id}")
         else:
-            print(f"Handshake Phase 1: Discovered and updated {'public' if peer_is_public else 'private'} peer {peer_node_id[:10]}...")
+            logger.debug(f"Handshake Phase 1: Discovered and updated {'public' if peer_is_public else 'private'} peer {peer_id}")
         
 
         # 2. Respond to Challenge
@@ -1174,59 +1271,58 @@ async def do_handshake_with_peer(peer_url_to_connect: str):
         
         # Case A: Peer told us that WE are behind ('sync_required'). We must PULL.
         if response_resp and response_resp.get('error') == 'sync_required':
-            print(f"Peer {peer_node_id[:10]} reported that WE are out of sync. Initiating PULL-sync.")
-            await _sync_blockchain(node_id=peer_node_id)
+            logger.info(f"Peer {peer_id} reported that WE are out of sync. Initiating PULL-sync.")
+            await _sync_blockchain(node_id=peer_id)
             return
             
         # Case B: Peer is behind and REQUESTED that we PUSH blocks to THEM ('sync_requested').
         if response_resp and response_resp.get('result') == 'sync_requested':
-            print(f"Peer {peer_node_id[:10]} is behind and requested a PUSH-sync from us.")
+            logger.info(f"Peer {peer_id} is behind and requested a PUSH-sync from us.")
             sync_details = response_resp.get('detail', {})
             start_block = sync_details.get('start_block')
             target_block = sync_details.get('target_block')
             if start_block is not None and target_block is not None:
-                peer_info = NodesManager.get_peer(peer_node_id) # This will now succeed
-                peer_info['node_id'] = peer_node_id
+                peer_info = NodesManager.get_peer(peer_id)
+                peer_info['node_id'] = peer_id
                 trigger_data = {'id': target_block}
                 asyncio.create_task(_push_sync_to_peer(peer_info, start_block, db, trigger_data))
             return
 
         # Case C: Other failure
         if not (response_resp and response_resp.get('ok')):
-            print(f"Handshake failed: Peer {peer_node_id[:10]} rejected our response: {response_resp}")
+            logger.warning(f"Handshake failed: Peer {peer_id} rejected our response: {response_resp}")
             return
 
         # Case D: Handshake was successful and no sync instruction was given.
-        print(f"Handshake SUCCESS with peer {peer_node_id[:10]}.")
+        logger.info(f"Handshake SUCCESS with peer {peer_id}.")
 
         # Fallback PULL trigger: If peer didn't respond with instructions but we see they are ahead.
         local_height = await db.get_next_block_id() - 1
         if peer_height > local_height:
-             print(f"Peer {peer_node_id[:10]} has longer chain ({peer_height} > {local_height}). Initiating PULL-sync.")
-             await _sync_blockchain(node_id=peer_node_id)
+             logger.info(f"Peer {peer_id} has longer chain ({peer_height} > {local_height}). Initiating PULL-sync.")
+             await _sync_blockchain(node_id=peer_id)
         
         # 4. Perform peer exchange
-        print(f"Performing peer exchange with {peer_node_id[:10]}...")
-        # ... (peer exchange logic remains the same) ...
+        logger.debug(f"Performing peer exchange with {peer_id}")
         peers_resp = await interface.get_peers()
         if peers_resp and peers_resp.get('ok'):
             for discovered_peer in peers_resp['result']['peers']:
                 if discovered_peer.get('url') and discovered_peer['node_id'] not in NodesManager.peers and discovered_peer['node_id'] != self_node_id:
                     if len(NodesManager.peers) < MAX_PEERS:
-                        print(f"Found new connectable peer {discovered_peer['node_id'][:10]} via exchange. Attempting handshake.")
+                        logger.info(f"Found node {discovered_peer['node_id']} via exchange. Attempting handshake.")
                         asyncio.create_task(do_handshake_with_peer(discovered_peer['url']))
     
     except httpx.RequestError:
-        known_peer_id = NodesManager.find_peer_by_url(peer_url_to_connect)
-        if known_peer_id:
-            await handle_unreachable_peer(known_peer_id, peer_url_to_connect, "handshake")
+        peer_id = NodesManager.find_peer_by_url(peer_url_to_connect)
+        if peer_id:
+            await handle_unreachable_peer(peer_id, peer_url_to_connect, "handshake")
         else:
             # If we don't know them, we can't remove them, just log it.
-            print(f"Failed to connect to unknown or new peer at {peer_url_to_connect} during handshake.")
+            logger.warning(f"Failed to connect to unknown or new peer at {peer_url_to_connect} during handshake.")
 
     except Exception as e:
-        print(f"Error during handshake with {peer_url_to_connect}: {e}")
-        traceback.print_exc() # Added for better debugging
+        logger.error(f"Error during handshake with {peer_url_to_connect}: {e}")
+        traceback.print_exc()
         await security.security_monitor.log_event('handshake_failure', {
             'url': peer_url_to_connect,
             'error': str(e)
@@ -1239,15 +1335,15 @@ async def periodic_peer_discovery():
     This version is now resilient to unreachable peers.
     """
     await asyncio.sleep(20)
-    await do_handshake_with_peer(DENARO_BOOTSTRAP_NODE_URL)
+    await do_handshake_with_peer(DENARO_BOOTSTRAP_NODE)
 
     while True:
         await asyncio.sleep(60)
-        print("Running periodic peer discovery...")
+        logger.debug("Running periodic peer discovery...")
         
         if not NodesManager.peers:
-            print("Peer list is empty. Retrying handshake with bootstrap node.")
-            await do_handshake_with_peer(DENARO_BOOTSTRAP_NODE_URL)
+            logger.info("Peer list is empty. Retrying handshake with bootstrap node.")
+            await do_handshake_with_peer(DENARO_BOOTSTRAP_NODE)
             continue
 
         connectable_peers_tuples = [
@@ -1255,17 +1351,16 @@ async def periodic_peer_discovery():
         ]
 
         if not connectable_peers_tuples:
-            print("No connectable peers to ask for discovery. Waiting for new inbound connections.")
+            logger.debug("No connectable peers to ask for discovery. Waiting for new inbound connections.")
             continue
 
         
         # Define peer_id and peer_url here so they are in scope for the entire loop iteration.
-        node_id_to_ask, peer_data_to_ask = random.choice(connectable_peers_tuples)
-        peer_id = node_id_to_ask
+        peer_id, peer_data_to_ask = random.choice(connectable_peers_tuples)
         peer_url = peer_data_to_ask['url']
         
         
-        print(f"Asking peer {peer_id[:10]} for their peer list...")
+        logger.debug(f"Asking peer {peer_id} for their peer list")
         try:
             # Use the correctly scoped variables
             interface = NodeInterface(peer_url, client=http_client, db=db)
@@ -1277,20 +1372,19 @@ async def periodic_peer_discovery():
                 continue
             
             discovered_peers = peers_resp['result']['peers']
-            print(f"Discovered {len(discovered_peers)} peers from {peer_id[:10]}.")
+            logger.debug(f"Discovered {len(discovered_peers)} peers from {peer_id}.")
             for discovered_peer in discovered_peers:
                 if discovered_peer['node_id'] not in NodesManager.peers and discovered_peer['node_id'] != self_node_id:
                     if len(NodesManager.peers) < MAX_PEERS and discovered_peer.get('url'):
-                        print(f"Found new peer {discovered_peer['node_id'][:10]} via exchange. Attempting handshake.")
+                        logger.info(f"Found new peer {discovered_peer['node_id']} via exchange. Attempting handshake.")
                         asyncio.create_task(do_handshake_with_peer(discovered_peer['url']))
         
         except httpx.RequestError:
-            # --- FIX: Use the correct variables and a more accurate context string ---
             await handle_unreachable_peer(peer_id, peer_url, "peer discovery")
 
         except Exception as e:
             # Use the correctly scoped variable in the log message
-            print(f"Error during peer discovery with {peer_url}: {e}")
+            logger.error(f"Error during peer discovery with {peer_url}: {e}")
 
 
 async def is_url_local(url: str) -> bool:
@@ -1309,42 +1403,42 @@ async def check_own_reachability():
     global self_is_public
     await asyncio.sleep(10)
 
-    if not self_url:
-        print("INFO: DENARO_SELF_URL not set. Assuming this is a private node.")
+    if not DENARO_SELF_URL:
+        logger.info("DENARO_SELF_URL not set. Assuming this is a private node.")
         NodesManager.set_public_status(False)
         return
 
-    if await is_url_local(self_url):
-        print(f"INFO: DENARO_SELF_URL is a local address ({self_url}). Operating as a private node.")
+    if await is_url_local(DENARO_SELF_URL):
+        logger.info(f"DENARO_SELF_URL is a local address ({DENARO_SELF_URL}). Operating as a private node.")
         self_is_public = False
         NodesManager.set_public_status(False)
         return
 
-    print(f"Potential public URL is {self_url}. Asking bootstrap node to verify...")
-    bootstrap_interface = NodeInterface(DENARO_BOOTSTRAP_NODE_URL, client=http_client, db=db)
+    logger.info(f"Potential public URL is {DENARO_SELF_URL}. Asking bootstrap node to verify")
+    bootstrap_interface = NodeInterface(DENARO_BOOTSTRAP_NODE, client=http_client, db=db)
     
     try:
-        is_reachable = await bootstrap_interface.check_peer_reachability(self_url)
+        is_reachable = await bootstrap_interface.check_peer_reachability(DENARO_SELF_URL)
         if is_reachable:
             self_is_public = True
             NodesManager.set_public_status(True)
-            print(f"SUCCESS: Node confirmed to be publicly reachable at {self_url}")
+            logger.info(f"SUCCESS: Node confirmed to be publicly reachable at {DENARO_SELF_URL}")
         else:
             self_is_public = False
             NodesManager.set_public_status(False)
-            print(f"WARNING: DENARO_SELF_URL is set to {self_url}, but it was not reachable by the bootstrap node. Operating as a private node.")
+            logger.warning(f"DENARO_SELF_URL is set to {DENARO_SELF_URL}, but it was not reachable by the bootstrap node. Operating as a private node.")
     
 
     except httpx.RequestError:
         # The bootstrap node is unreachable. We can't verify, so we must assume we are private.
         self_is_public = False
         NodesManager.set_public_status(False)
-        print(f"Bootstrap node at {DENARO_BOOTSTRAP_NODE_URL} is unreachable. Assuming this is a private node.")
+        logger.warning(f"Bootstrap node at {DENARO_BOOTSTRAP_NODE} is unreachable. Assuming this is a private node.")
     
     except Exception as e:
         self_is_public = False
         NodesManager.set_public_status(False)
-        print(f"Failed to verify reachability with bootstrap node. Assuming private. Error: {e}")
+        logger.error(f"Failed to verify reachability with bootstrap node. Assuming private. Error: {e}")
 
 
 async def periodic_update_fetcher():
@@ -1355,7 +1449,7 @@ async def periodic_update_fetcher():
     """
     await asyncio.sleep(30) 
 
-    print("Starting periodic update fetcher for this node...")
+    logger.info("Starting periodic update fetcher for this node...")
     while True:
         await asyncio.sleep(60) 
         
@@ -1367,13 +1461,12 @@ async def periodic_update_fetcher():
             if connectable_peers:
                 # Probe up to 2 random peers to find a potentially longer chain
                 peers_to_probe = random.sample(connectable_peers, k=min(len(connectable_peers), 2))
-                print(f"Probing {len(peers_to_probe)} peer(s) for a longer chain...")
+                logger.debug(f"Probing {len(peers_to_probe)} peer(s) for a longer chain")
                 for peer_info in peers_to_probe:
                     await check_peer_and_sync(peer_info)
                     await asyncio.sleep(1) # Small delay between probes
         
         # 2. CHECK FOR NEW TRANSACTIONS (MEMPOOL SYNC)
-        # This logic remains largely the same, but we select from all connectable peers.
         all_peers = NodesManager.get_all_peers()
         connectable_peers = [p for p in all_peers if p.get('url')]
 
@@ -1385,14 +1478,13 @@ async def periodic_update_fetcher():
         interface = NodeInterface(peer_to_ask['url'], client=http_client, db=db)
         peer_id = peer_to_ask['node_id']
         peer_url = peer_to_ask['url']
-        peer_id_short = peer_id[:10]
         
-        print(f"Polling peer {peer_id_short} for new transactions...")
+        logger.debug(f"Polling peer {peer_id} for new transactions")
         try:
             mempool_hashes_resp = await interface.get_mempool_hashes()
             
             if mempool_hashes_resp is None or not mempool_hashes_resp.get('ok'):
-                print(f"Could not get mempool hashes from {peer_id_short}. Skipping transaction sync.")
+                logger.warning(f"Could not get mempool hashes from {peer_id}. Skipping transaction sync.")
                 continue 
 
             remote_hashes = set(mempool_hashes_resp['result'])
@@ -1400,12 +1492,10 @@ async def periodic_update_fetcher():
             needed_hashes = list(remote_hashes - local_hashes)
 
             if needed_hashes:
-                print(f"Discovered {len(needed_hashes)} new transaction(s) from {peer_id_short}. Fetching...")
+                logger.debug(f"Discovered {len(needed_hashes)} new transaction(s) from {peer_id}. Fetching...")
                 
-                # Fetch in batches to avoid overload
-                batch_size = 100
-                for i in range(0, len(needed_hashes), batch_size):
-                    batch = needed_hashes[i:i+batch_size]
+                for i in range(0, len(needed_hashes), MAX_TX_FETCH_LIMIT):
+                    batch = needed_hashes[i:i+MAX_TX_FETCH_LIMIT]
                     fetched_txs_resp = await interface.get_transactions_by_hash(batch)
                     
                     if fetched_txs_resp and fetched_txs_resp.get('ok'):
@@ -1414,30 +1504,30 @@ async def periodic_update_fetcher():
                             try:
                                 is_valid, error_msg = security.input_validator.validate_transaction_data(tx_hex)
                                 if not is_valid:
-                                    print(f"Skipping invalid transaction from peer: {error_msg}")
+                                    logger.warning(f"Skipping invalid transaction from peer: {error_msg}")
                                     continue
                                     
                                 tx = await Transaction.from_hex(tx_hex)
                                 if await security.transaction_pool.add_transaction(tx.hash(), tx, db):
-                                    print(f"  -> Accepted new pending transaction {tx.hash()[:10]}...")
+                                    logger.debug(f"  -> Accepted new pending transaction {tx.hash()[:10]}")
                                     transactions_to_propagate.append(tx_hex)
                             except Exception as e:
-                                print(f"Error processing fetched transaction: {e}")
+                                logger.error(f"Error processing fetched transaction: {e}")
                         
                         if transactions_to_propagate:
-                            print(f"Propagating {len(transactions_to_propagate)} newly learned transactions...")
+                            logger.debug(f"Propagating {len(transactions_to_propagate)} newly learned transactions...")
                             for tx_hex in transactions_to_propagate:
                                 asyncio.create_task(
                                     propagate('push_tx', {'tx_hex': tx_hex}, ignore_node_id=peer_to_ask['node_id'])
                                 )
                     else:
-                        print(f"Failed to fetch full transaction data for batch.")
+                        logger.warning(f"Failed to fetch full transaction data for batch.")
         
         except httpx.RequestError:
             await handle_unreachable_peer(peer_id, peer_url, "periodic mempool fetch")
 
         except Exception as e:
-            print(f"An unexpected error occurred during periodic fetch from {peer_id_short}: {e}")
+            logger.error(f"An unexpected error occurred during periodic fetch from {peer_id}: {e}")
             traceback.print_exc()
 
 
@@ -1449,7 +1539,7 @@ async def process_and_create_block(block_info: dict) -> bool:
     
     # Validate block content size
     if len(block_content) > MAX_BLOCK_CONTENT_SIZE:
-        print(f"Sync failed: Block content too large for block {block.get('id')}.")
+        logger.warning(f"Sync failed: Block content too large for block {block.get('id')}.")
         return False
     
     try:
@@ -1457,16 +1547,16 @@ async def process_and_create_block(block_info: dict) -> bool:
         for tx_hex in txs_hex:
             is_valid, error_msg = security.input_validator.validate_transaction_data(tx_hex)
             if not is_valid:
-                print(f"Sync failed: Invalid transaction in block {block.get('id')}: {error_msg}")
+                logger.warning(f"Sync failed: Invalid transaction in block {block.get('id')}: {error_msg}")
                 return False
             transactions.append(await Transaction.from_hex(tx_hex))
 
     except Exception as e:
-        print(f"Sync failed: Could not deserialize transactions for block {block.get('id')}: {e}")
+        logger.error(f"Sync failed: Could not deserialize transactions for block {block.get('id')}: {e}")
         return False
 
     if not await create_block(block_content, transactions):
-        print(f"Sync failed: Invalid block received from peer at height {block.get('id')}.")
+        logger.warning(f"Sync failed: Invalid block received from peer at height {block.get('id')}.")
         return False
         
     return True
@@ -1474,7 +1564,7 @@ async def process_and_create_block(block_info: dict) -> bool:
 
 async def handle_reorganization(node_interface: NodeInterface, local_height: int):
     """Handles blockchain reorganization with proper validation"""
-    print(f"[REORG] Fork detected! Starting reorganization process from local height {local_height}.")
+    logger.warning(f"[REORG] Fork detected! Starting reorganization process from local height {local_height}.")
 
     last_common_block_id = -1
     check_height = local_height
@@ -1483,7 +1573,7 @@ async def handle_reorganization(node_interface: NodeInterface, local_height: int
     while check_height >= 0:
         local_block = await db.get_block_by_id(check_height)
         if not local_block:
-            print(f"[REORG] Error: Could not retrieve local block at height {check_height}. Halting search.")
+            logger.error(f"[REORG] Error: Could not retrieve local block at height {check_height}. Halting search.")
             break
 
         try:
@@ -1492,31 +1582,31 @@ async def handle_reorganization(node_interface: NodeInterface, local_height: int
                 remote_hash = remote_block_info['result']['block']['hash']
                 if remote_hash == local_block['hash']:
                     last_common_block_id = check_height
-                    print(f"[REORG] Found common ancestor at block height: {last_common_block_id}")
+                    logger.info(f"[REORG] Found common ancestor at block height: {last_common_block_id}")
                     break
             else:
-                print(f"[REORG] Could not get remote block at height {check_height}. Aborting search.")
+                logger.warning(f"[REORG] Could not get remote block at height {check_height}. Aborting search.")
                 return None
         
         except httpx.RequestError:
-            print(f"[REORG] Peer became unreachable during common ancestor search. Aborting.")
+            logger.warning(f"[REORG] Peer became unreachable during common ancestor search. Aborting.")
             # Let the caller handle the peer removal.
             return None
 
         except Exception as e:
-            print(f"[REORG] Network error while finding common ancestor at height {check_height}: {e}")
+            logger.error(f"[REORG] Network error while finding common ancestor at height {check_height}: {e}")
             return None
 
         if (local_height - check_height) > 200:
-            print("[REORG] Reorganization depth exceeds 200 blocks. Aborting for safety.")
+            logger.warning("[REORG] Reorganization depth exceeds 200 blocks. Aborting for safety.")
             return None
         
         check_height -= 1
 
     if last_common_block_id == -1:
-        print("[REORG] WARNING: Could not find a common ancestor. Local chain appears invalid. Will perform a full rollback.")
+        logger.warning("[REORG] Could not find a common ancestor. Local chain appears invalid. Will perform a full rollback.")
 
-    print(f"[REORG] Collecting transactions from orphaned blocks between {last_common_block_id + 1} and {local_height}.")
+    logger.info(f"[REORG] Collecting transactions from orphaned blocks between {last_common_block_id + 1} and {local_height}.")
     orphaned_txs = []
     for height in range(last_common_block_id + 1, local_height + 1):
         block = await db.get_block_by_id(height)
@@ -1524,15 +1614,15 @@ async def handle_reorganization(node_interface: NodeInterface, local_height: int
             block_txs = await db.get_block_transactions(block['hash'], hex_only=False)
             orphaned_txs.extend([tx for tx in block_txs if not isinstance(tx, CoinbaseTransaction)])
 
-    print(f"[REORG] Rolling back local chain to block {last_common_block_id}.")
+    logger.info(f"[REORG] Rolling back local chain to block {last_common_block_id}.")
     await db.remove_blocks(last_common_block_id + 1)
 
-    print(f"[REORG] Re-adding {len(orphaned_txs)} orphaned transactions to the pending pool.")
+    logger.info(f"[REORG] Re-adding {len(orphaned_txs)} orphaned transactions to the pending pool.")
     for tx in orphaned_txs:
         try:
             await security.transaction_pool.add_transaction(tx.hash(), tx, db)
         except Exception as e:
-            print(f"[REORG] Could not re-add orphaned transaction {tx.hash()}: {e}")
+            logger.error(f"[REORG] Could not re-add orphaned transaction {tx.hash()}: {e}")
 
     return last_common_block_id
 
@@ -1541,7 +1631,7 @@ async def _sync_blockchain(node_id: str = None):
     """Synchronizes the local blockchain with proper state management"""
     try:
         async with security.sync_state_manager.acquire_sync():
-            print('[SYNC] Starting blockchain synchronization process...')
+            logger.info('[SYNC] Starting blockchain synchronization process...')
 
             peer_to_sync_from = None
             if node_id:
@@ -1554,12 +1644,12 @@ async def _sync_blockchain(node_id: str = None):
                     peer_to_sync_from = active_peers[0]
 
             if not peer_to_sync_from:
-                print("[SYNC] Aborting: No known (or specified) peer to sync from.")
+                logger.warning("[SYNC] Aborting: No known (or specified) peer to sync from.")
                 return
 
             peer_url = peer_to_sync_from['url']
-            peer_id_short = peer_to_sync_from['node_id'][:10]
-            print(f"[SYNC] Attempting to sync with peer {peer_id_short}... at {peer_url}")
+            peer_id = peer_to_sync_from['node_id']
+            logger.info(f"[SYNC] Attempting to sync with peer {peer_id} at {peer_url}")
             
             node_interface = NodeInterface(peer_url, client=http_client, db=db)
 
@@ -1569,19 +1659,19 @@ async def _sync_blockchain(node_id: str = None):
             remote_status_resp = await node_interface.get_status()
 
             if not (remote_status_resp and remote_status_resp.get('ok')):
-                print(f"[SYNC] Failed to get chain status from {peer_url}. Aborting.")
+                logger.warning(f"[SYNC] Failed to get chain status from {peer_url}. Aborting.")
                 return
                 
             remote_status = remote_status_resp['result']
             remote_height = remote_status['height']
             
-            print(f"[SYNC] Local height: {local_height}, Remote height: {remote_height}")
+            logger.info(f"[SYNC] Local height: {local_height}, Remote height: {remote_height}")
 
             if remote_height <= local_height:
-                print("[SYNC] Local chain is at or ahead of remote. No sync needed.")
+                logger.debug("[SYNC] Local chain is at or ahead of remote. No sync needed.")
                 return
 
-            print("[SYNC] Remote chain is longer.")
+            logger.info("[SYNC] Remote chain is longer.")
             
             fork_detected = False
             if local_height > -1:
@@ -1589,47 +1679,46 @@ async def _sync_blockchain(node_id: str = None):
                 remote_block_resp = await node_interface.get_block(str(local_height))
                 
                 if not (remote_block_resp and remote_block_resp.get('ok')):
-                    print("[SYNC] Could not fetch remote block for integrity check. Aborting.")
+                    logger.warning("[SYNC] Could not fetch remote block for integrity check. Aborting.")
                     return
                 
                 remote_block_at_our_height = remote_block_resp['result']
                 if remote_block_at_our_height['block']['hash'] != local_last_hash:
-                    print(f"[SYNC] Fork detected. Our tip is on a shorter fork.")
+                    logger.warning(f"[SYNC] Fork detected. Our tip is on a shorter fork.")
                     fork_detected = True
             else:
-                print("[SYNC] Local chain is empty. Beginning initial block download.")
+                logger.info("[SYNC] Local chain is empty. Beginning initial block download.")
 
             if fork_detected:
                 reorg_result = await handle_reorganization(node_interface, local_height)
                 if reorg_result is None:
-                    print("[SYNC] Reorganization failed. Aborting sync cycle.")
+                    logger.error("[SYNC] Reorganization failed. Aborting sync cycle.")
                     return
             
-            print("[SYNC] Starting block fetching process.")
-            limit = 100
+            logger.info("[SYNC] Starting block fetching process.")
             while True:
                 start_block_id = await db.get_next_block_id()
 
                 if start_block_id > remote_height:
-                    print("[SYNC] Local height now meets or exceeds remote height. Sync appears complete.")
+                    logger.info("[SYNC] Local height now meets or exceeds remote height. Sync appears complete.")
                     break
 
-                print(f"[SYNC] Fetching {limit} blocks starting from block {start_block_id}...")
+                logger.debug(f"[SYNC] Fetching {MAX_REORG_DEPTH} blocks starting from block {start_block_id}...")
                 
-                blocks_resp = await node_interface.get_blocks(start_block_id, limit)
+                blocks_resp = await node_interface.get_blocks(start_block_id, MAX_REORG_DEPTH)
                 
                 if not (blocks_resp and blocks_resp.get('ok')):
-                    print("[SYNC] Failed to fetch a batch of blocks from peer. Aborting sync cycle.")
+                    logger.warning("[SYNC] Failed to fetch a batch of blocks from peer. Aborting sync cycle.")
                     break
                 
                 blocks_batch = blocks_resp['result']
                 if not blocks_batch:
-                    print('[SYNC] No more blocks returned by peer. Sync presumed complete.')
+                    logger.info('[SYNC] No more blocks returned by peer. Sync presumed complete.')
                     break
                 
                 for block_data in blocks_batch:
                     if not await process_and_create_block(block_data):
-                        print("[SYNC] FATAL ERROR: Failed to create blocks during sync. Aborting.")
+                        logger.error("[SYNC] FATAL ERROR: Failed to create blocks during sync. Aborting.")
                         await security.reputation_manager.record_violation(
                             peer_to_sync_from['node_id'], 'invalid_sync_block', severity=8
                         )
@@ -1645,11 +1734,11 @@ async def _sync_blockchain(node_id: str = None):
     except HTTPException:
         raise
     except Exception as e:
-        print(f"[SYNC] An unexpected error occurred during the sync process: {e}")
+        logger.error(f"[SYNC] An unexpected error occurred during the sync process: {e}")
         import traceback
         traceback.print_exc()
     finally:
-        print('[SYNC] Synchronization process finished.')
+        logger.info('[SYNC] Synchronization process finished.')
 
 
 async def handle_unreachable_peer(peer_id: str, peer_url: str, context: str):
@@ -1658,7 +1747,7 @@ async def handle_unreachable_peer(peer_id: str, peer_url: str, context: str):
     This action is NOT punitive. It simply removes the peer from the active
     list for this session to prevent wasting resources. The peer can be re-discovered later.
     """
-    print(f"Peer {peer_id[:10]} at {peer_url} is unreachable ({context}). Removing from active peer list.")
+    logger.warning(f"Peer {peer_id} at {peer_url} is unreachable ({context}). Removing from active peer list.")
     NodesManager.remove_peer(peer_id)
 
 
@@ -1671,9 +1760,11 @@ async def handle_unreachable_peer(peer_id: str, peer_url: str, context: str):
 async def startup():
     global db, self_node_id, http_client  # Add http_client here
     
+    logger.info("Starting Denaro Node Server...")
+
     # Initialize the shared HTTP client for the application's lifespan
     http_client = httpx.AsyncClient(timeout=CONNECTION_TIMEOUT)
-    print("Shared HTTP client initialized.")
+    logger.info("Shared HTTP client initialized.")
     
     # Initialize security components
     await security.startup()
@@ -1682,21 +1773,26 @@ async def startup():
     initialize_identity()
     self_node_id = get_node_id()
     NodesManager.init(self_node_id)
-    
-    db_user = config.get('POSTGRES_USER', "denaro")
-    db_password = config.get('POSTGRES_PASSWORD', 'denaro')
-    db_name = config.get('DENARO_DATABASE_NAME', "denaro")
-    db_host = config.get('DENARO_DATABASE_HOST')
-    db = await Database.create(user=db_user, password=db_password, database=db_name, host=db_host)
-    
-    print("Clearing pending transaction pool at startup...")
-    await db.remove_all_pending_transactions()
-    print("Pending transaction pool cleared.")
 
+    db = await Database.create(
+        user=POSTGRES_USER,
+        password=POSTGRES_PASSWORD,
+        database=DENARO_DATABASE_NAME,
+        host=DENARO_DATABASE_HOST
+    )
+    
+    logger.info("Clearing pending transaction pool.")
+    await db.remove_all_pending_transactions()
+    logger.info("Pending transaction pool cleared.")
+    
+    logger.info("Starting background tasks.")
     asyncio.create_task(check_own_reachability())
     asyncio.create_task(periodic_peer_discovery())
     asyncio.create_task(periodic_update_fetcher())
 
+    logger.info(f"Denaro node server started on http://{DENARO_NODE_HOST}:{DENARO_NODE_PORT}")
+    logger.info("Application startup complete.")
+    
 
 @app.on_event("shutdown")
 async def shutdown():
@@ -1704,14 +1800,14 @@ async def shutdown():
     # Close the shared HTTP client
     if http_client:
         await http_client.aclose()
-        print("Shared HTTP client closed.")
+        logger.info("Shared HTTP client closed.")
         
     await security.shutdown()
 
 
 @app.exception_handler(Exception)
 async def unhandled_exception_handler(request: Request, exc: Exception):
-    print(f"Unhandled exception: {exc}")
+    logger.error(f"Unhandled exception: {exc}")
     import traceback
     traceback.print_exc()
     
@@ -1739,7 +1835,7 @@ async def middleware(request: Request, call_next):
     path = request.scope['path']
     normalized_path = re.sub('/+', '/', path)
     if normalized_path != path:
-        new_url = str(request.url).replace(path, normalized_path)
+        new_url = str(request.url.replace(path=normalized_path))
         return RedirectResponse(url=new_url)
 
     try:
@@ -1808,7 +1904,7 @@ async def push_tx(
         return {'ok': False, 'error': 'Transaction just added'}
     
     pending_count = await db.get_pending_transaction_count()
-    if pending_count >= MAX_PENDING_POOL_SIZE:
+    if pending_count >= MAX_MEMPOOL_SIZE:
         await security.security_monitor.log_event('mempool_full', {
             'peer_id': verified_sender,
             'pending_count': pending_count
@@ -1865,12 +1961,12 @@ async def submit_tx(
         return {'ok': False, 'error': 'Transaction recently seen'}
 
     pending_count = await db.get_pending_transaction_count()
-    if pending_count >= MAX_PENDING_POOL_SIZE:
+    if pending_count >= MAX_MEMPOOL_SIZE:
         return {'ok': False, 'error': 'Mempool is full'}
 
     try:
         if await security.transaction_pool.add_transaction(tx.hash(), tx, db):
-            print(f"Accepted transaction {tx.hash()} from external client. Propagating to network...")
+            logger.info(f"Accepted transaction {tx.hash()} from external client. Propagating to network...")
             background_tasks.add_task(propagate, 'push_tx', {'tx_hex': tx_hex}, ignore_node_id=None)
             await security.transaction_cache.put(tx.hash(), True)
             return {'ok': True, 'result': 'Transaction has been accepted'}
@@ -1958,7 +2054,7 @@ async def push_block(
             return {'ok': False, 'error': 'Block failed validation.'}
 
         miner_ip = request.client.host
-        print(f"Accepted block {block_no} from miner at {miner_ip}. Propagating to network...")
+        logger.info(f"Accepted block {block_no} from miner at {miner_ip}. Propagating to network...")
         
         # Propagate to all peers
         background_tasks.add_task(propagate, 'submit_block', body, ignore_node_id=None, db=db) 
@@ -2043,7 +2139,7 @@ async def submit_block(
             txs_data = txs_data.split(',') if txs_data else []
             
         for tx_hex in txs_data:
-            if isinstance(tx_hex, str) and len(tx_hex) == 64:
+            if isinstance(tx_hex, str) and len(tx_hex) == 64 and VALID_HEX_PATTERN.match(tx_hex):
                 tx_hashes_to_find.append(tx_hex)
             else:
                 is_valid, error_msg = security.input_validator.validate_transaction_data(tx_hex)
@@ -2073,7 +2169,7 @@ async def submit_block(
         # Record successful block
         await security.reputation_manager.record_good_behavior(verified_sender, points=5)
         
-        print(f"Accepted block {block_no} from {verified_sender[:10]}... Propagating.")
+        logger.info(f"Accepted block {block_no} from {verified_sender}. Propagating to network...")
         background_tasks.add_task(
             propagate, 'submit_block', body, 
             ignore_node_id=verified_sender, db=db
@@ -2161,7 +2257,7 @@ async def submit_blocks(
                         return {'ok': False, 'error': f'Block {block_no} failed validation. Halting.'}
                     
                     await security.block_cache.put(block_identifier, True)
-                    print(f"Accepted block {block_no} from {verified_sender[:10]} via bulk sync.")
+                    logger.info(f"Accepted block {block_no} from {verified_sender} via bulk sync.")
 
                 # Reward successful bulk submission
                 await security.reputation_manager.record_good_behavior(
@@ -2213,7 +2309,7 @@ async def handshake_challenge(request: Request):
             "node_id": get_node_id(),
             "pubkey": get_public_key_hex(),
             "is_public": NodesManager.self_is_public,
-            "url": self_url,
+            "url": DENARO_SELF_URL,
             "height": height,
             "last_hash": last_block['hash'] if last_block else None
         }
@@ -2251,7 +2347,7 @@ async def handshake_response(
         await security.reputation_manager.record_violation(verified_sender, 'invalid_handshake', severity=6)
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Invalid or expired challenge.")
     
-    print(f"Received handshake from {verified_sender[:10]} (Height: {peer_height})")
+    logger.info(f"Received handshake from {verified_sender} (Height: {peer_height})")
 
     # --- Compare Chain States and Determine Action ---
     local_height = await db.get_next_block_id() - 1
@@ -2260,7 +2356,7 @@ async def handshake_response(
         # CASE 1: We are behind.
         # We must ask the connecting peer (who has the longer chain) to PUSH blocks to us.
         # This is critical for NAT traversal (e.g., an empty public node learning from a private node).
-        print(f"Our chain is behind. Requesting peer {verified_sender[:10]} to PUSH-sync to us.")
+        logger.info(f"Our chain is behind. Requesting peer {verified_sender} to PUSH-sync to us.")
         return JSONResponse(
             status_code=200, # A successful response that contains instructions
             content={
@@ -2277,7 +2373,7 @@ async def handshake_response(
         # CASE 2: The connecting peer is behind.
         # We tell them they need to sync, and it's their responsibility to act.
         # We respond with a 409 Conflict to signal a state mismatch they need to resolve.
-        print(f"Our chain is longer. Informing peer {verified_sender[:10]} a sync is required.")
+        logger.info(f"Our chain is longer. Informing peer {verified_sender} a sync is required.")
         return JSONResponse(
             status_code=status.HTTP_409_CONFLICT,
             content={
@@ -2289,7 +2385,7 @@ async def handshake_response(
     
     # CASE 3: Heights are equal. We assume they are in sync.
     # (A more advanced implementation could compare hashes here to detect forks).
-    print(f"Handshake complete for peer {verified_sender[:10]}. Chains appear to be in sync.")
+    logger.info(f"Handshake complete for peer {verified_sender}. Chains appear to be in sync.")
     return {"ok": True, "result": "Handshake successful."}
 
 
@@ -2335,8 +2431,8 @@ async def get_mining_info(
 
     # Guard mempool size (same as before)
     pending_count = await db.get_pending_transaction_count()
-    if pending_count > MAX_PENDING_POOL_SIZE:
-        print(f"Mempool size ({pending_count}) exceeds limit ({MAX_PENDING_POOL_SIZE}). Triggering cleanup.")
+    if pending_count > MAX_MEMPOOL_SIZE:
+        logger.warning(f"Mempool size ({pending_count}) exceeds limit of ({MAX_MEMPOOL_SIZE}). Triggering cleanup.")
         await clear_pending_transactions([])
 
     # === Load ALL mempool transactions by hash, then hydrate ===
@@ -2344,13 +2440,12 @@ async def get_mining_info(
     try:
         all_hashes = await db.get_all_pending_transaction_hashes()  # returns List[str]
     except Exception as e:
-        print(f"Error fetching mempool hashes: {e}")
+        logger.error(f"Error fetching mempool hashes: {e}")
         all_hashes = []
 
     # Optionally cap to something huge to avoid pathological mempools
-    MAX_CANDIDATES = 5000
-    if len(all_hashes) > MAX_CANDIDATES:
-        all_hashes = all_hashes[:MAX_CANDIDATES]
+    if len(all_hashes) > MAX_MINING_CANDIDATES:
+        all_hashes = all_hashes[:MAX_MINING_CANDIDATES]
 
     # Preserve DB-provided order (whatever it is), and create a stable index
     order_index = {h: i for i, h in enumerate(all_hashes)}
@@ -2370,7 +2465,7 @@ async def get_mining_info(
 
     # Only keep hashes we could hydrate
     candidate_hashes = [h for h in all_hashes if h in tx_by_hash]
-    print(f"Building block template from full mempool. Candidates: {len(candidate_hashes)}")
+    logger.debug(f"Building block template from full mempool. Candidates: {len(candidate_hashes)}")
 
     # Fast-path: nothing pending
     if not candidate_hashes:
@@ -2386,9 +2481,6 @@ async def get_mining_info(
             }
         }
         return Response(content=json.dumps(result, indent=4, cls=CustomJSONEncoder), media_type="application/json") if pretty else result
-
-    # --- Selection parameters ---
-    MAX_TX_DATA_SIZE = 1_900_000  # measure by hex length as approximation
 
     # Debug info per tx
     debug_rows = {}  # h -> dict
@@ -2441,13 +2533,13 @@ async def get_mining_info(
                 # Otherwise the parent must exist on-chain and index be valid
                 src = await chain_tx(p)
                 if src is None:
-                    print(f"Tx {h[:10]} references unknown prev tx {p[:10]}")
+                    logger.debug(f"Tx {h[:10]} references unknown prev tx {p[:10]}")
                     info['reason'] = f"invalid_input_unknown_parent:{p}"
                     ok = False
                     break
 
                 if 'outputs' in src and inp.index >= len(src['outputs']):
-                    print(f"Tx {h[:10]} references out-of-range output {inp.index} in {p[:10]}")
+                    logger.debug(f"Tx {h[:10]} references out-of-range output {inp.index} in {p[:10]}")
                     info['reason'] = f"invalid_input_out_of_range:{p}:{inp.index}"
                     ok = False
                     break
@@ -2459,14 +2551,14 @@ async def get_mining_info(
 
             # Full signature/script verification
             if not await tx.verify():
-                print(f"Tx {h[:10]} failed verification")
+                logger.debug(f"Tx {h[:10]} failed verification")
                 info['reason'] = "verify_failed"
                 invalid.add(h)
                 debug_rows[h] = info
                 continue
 
         except Exception as e:
-            print(f"Tx {h[:10]} verification error: {e}")
+            logger.debug(f"Tx {h[:10]} verification error: {e}")
             info['reason'] = f"verify_exception:{e}"
             invalid.add(h)
             debug_rows[h] = info
@@ -2513,7 +2605,7 @@ async def get_mining_info(
 
         # Ensure we don't exceed size target
         if total_size + len(tx_hex) > MAX_TX_DATA_SIZE:
-            print("Reached MAX_TX_DATA_SIZE while assembling block template.")
+            logger.debug("Reached MAX_TX_DATA_SIZE while assembling block template.")
             size_hard_stop = True
             break
 
@@ -2553,13 +2645,13 @@ async def get_mining_info(
 
     # Purge invalids
     if invalid:
-        print(f"Removing {len(invalid)} invalid tx(s) from mempool...")
+        logger.info(f"Removing {len(invalid)} invalid tx(s) from mempool")
         for h in invalid:
             try:
                 await db.remove_pending_transaction(h)
                 await security.transaction_pool.remove_transactions([h])
             except Exception as e:
-                print(f"Error removing invalid tx {h[:10]}: {e}")
+                logger.error(f"Error removing invalid tx {h[:10]}: {e}")
 
     # Compose response
     selected_hex = [tx.hex() for tx in selected]
@@ -2568,7 +2660,7 @@ async def get_mining_info(
     
     # Periodic cleanup (unchanged)
     if LAST_PENDING_TRANSACTIONS_CLEAN[0] < timestamp() - 600:
-        print("Clearing old pending transactions...")
+        logger.debug("Clearing old pending transactions")
         LAST_PENDING_TRANSACTIONS_CLEAN[0] = timestamp()
         # Feed the cleaner the full set we loaded (not just selected)
         try:
@@ -2788,7 +2880,7 @@ async def get_status():
         return {'ok': True, 'result': response_data}
         
     except Exception as e:
-        print(f"Error in /get_status: {e}")
+        logger.error(f"Error in /get_status: {e}")
         await security.security_monitor.log_event('get_status_error', {'error': str(e)})
         return {'ok': False, 'error': 'Internal server error'}
 
@@ -2813,7 +2905,7 @@ async def check_reachability(
 
     cached_result = await security.reachability_cache.get(url_to_check)
     if cached_result is not None:
-        print(f"Returning cached reachability for {url_to_check} for peer {verified_sender[:10]}")
+        logger.debug(f"Returning cached reachability for {url_to_check} for peer {verified_sender}")
         return {"ok": True, "result": {"reachable": cached_result, "cached": True}}
 
     is_valid, resolved_ip = await security.dns_client.validate_and_resolve(url_to_check)
@@ -2831,7 +2923,7 @@ async def check_reachability(
         if response.status_code > 0:
             is_reachable = True
     except httpx.RequestError as e:
-        print(f"Reachability check failed for {url_to_check}: {e}")
+        logger.warning(f"Reachability check failed for {url_to_check}: {e}")
         is_reachable = False
 
     await security.reachability_cache.put(url_to_check, is_reachable)

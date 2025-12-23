@@ -14,6 +14,10 @@ from dataclasses import dataclass
 from enum import IntEnum
 from abc import ABC, abstractmethod
 
+from .logger import get_logger
+
+logger = get_logger(__name__)
+
 
 class ConsensusVersion(IntEnum):
     """
@@ -154,11 +158,11 @@ class BaseConsensusRules(ABC):
         Validate block field ranges (soft fork - all versions).
         """
         if random_value < 0 or random_value > 0xFFFFFFFF:
-            print(f"Block rejected: random value out of range")
+            logger.warning("Block rejected: random value out of range")
             return False
         
         if difficulty < 0 or difficulty > 6553.5:
-            print(f"Block rejected: difficulty out of range")
+            logger.warning("Block rejected: difficulty out of range")
             return False
         
         return True
@@ -215,11 +219,11 @@ class Consensus_V1(BaseConsensusRules):
         median_time = await get_median_time_past_func(block_id - 1)
         
         if content_time <= median_time:
-            print(f"Block rejected: timestamp {content_time} not greater than MTP {median_time}")
+            logger.warning(f"Block rejected: timestamp {content_time} not greater than MTP {median_time}")
             return False
         
         if content_time > current_time + 60:  # Stricter future limit
-            print(f"Block rejected: timestamp too far in future")
+            logger.warning("Block rejected: timestamp too far in future")
             return False
         
         return True
@@ -272,7 +276,7 @@ class Consensus_V1(BaseConsensusRules):
         )
         
         if coinbase_count > 0:
-            print(f"Block rejected: {coinbase_count} coinbase in regular txs")
+            logger.warning(f"Block rejected: {coinbase_count} coinbase in regular txs")
             return False
         
         return True
