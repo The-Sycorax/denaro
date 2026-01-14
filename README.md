@@ -42,7 +42,7 @@
 
 ---
 
-<img src="https://node.denaro.network/height.png?t=1" alt="Denaro's Current Block Height" width="150">
+<img src="https://node.denaro.network/height.png?t=2" alt="Denaro's Current Block Height" width="150">
 
 ### Denaro Projects:
 * **[The-Sycorax](https://github.com/The-Sycorax) / [Denaro Wallet Client GUI](https://github.com/The-Sycorax/DenaroWalletClient-GUI)**
@@ -60,7 +60,7 @@
 
 ### Links:
 * **Current Website (Stale): [https://denaro.is](https://denaro.is/)**
-* **New Unofficial Website: [http://dinero.mine.bz](http://dinero.mine.bz/)**
+* **New Unofficial Website: [https://denaro.mine.bz](https://denaro.mine.bz/)**
 * **Denaro Node: [https://node.denaro.network](https://node.denaro.network/)**
 * **Block Explorer: [https://denaro-explorer.aldgram-solutions.fr](https://denaro-explorer.aldgram-solutions.fr/)**
 * **Discord Server: [https://discord.gg/4Sq2dK4KMv](https://discord.gg/4Sq2dK4KMv)**
