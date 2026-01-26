@@ -89,7 +89,7 @@ if [ -z "${LOG_LEVEL}" ]; then
 fi
 
 if [ -z "${LOG_FORMAT}" ]; then
-  export LOG_FORMAT="%(asctime)s UTC - %(levelname)s - %(name)s - %(message)s"
+  export LOG_FORMAT="%(asctime)s - %(levelname)s - %(name)s - %(message)s"
 fi
 
 if [ -z "${LOG_DATE_FORMAT}" ]; then

@@ -736,6 +736,32 @@ class SecureNodeComponents:
             if alerts:
                 logger.warning(f"SECURITY ALERTS: {alerts}")
 
+
+class FlagParameter(str):
+    """
+    Custom type for flag query parameters.
+    Accepts ?param (presence) and ?param=true as True.
+    Shows as boolean in OpenAPI docs.
+    """
+    @classmethod
+    def __get_validators__(cls):
+        yield cls.validate
+
+    @classmethod
+    def validate(cls, v):
+        if v is None:
+            return False
+        if isinstance(v, bool):
+            return v
+        if v == "":
+            return True
+        return v.lower() in ('true')
+
+    @classmethod
+    def __modify_schema__(cls, field_schema):
+        field_schema.update(type="boolean")
+
+
 # ============================================================================
 # RATE LIMITING KEY FUNCTION
 # ============================================================================
@@ -764,7 +790,7 @@ self_node_id: str = None
 self_is_public: bool = False 
 
 app_servers = [{"url": str(DENARO_SELF_URL)}] if DENARO_SELF_URL else []
-app = FastAPI(servers=app_servers, title="Denaro Node", description="Full node for the Denaro blockchain.", version=NODE_VERSION)
+app = FastAPI(servers=app_servers, title="Denaro Node API", description="Full node for the Denaro blockchain. GitHub repository: https://github.com/The-Sycorax/denaro", version=NODE_VERSION)
 
 limiter = Limiter(key_func=rate_limit_key_func)
 app.state.limiter = limiter
@@ -796,7 +822,6 @@ block_processing_lock = asyncio.Lock()
 @app.middleware("http")
 async def log_requests(request: Request, call_next):
     """Log all incoming HTTP requests using the logger."""
-    import time
     start_time = time.time()
     
     # Get client IP
@@ -969,8 +994,8 @@ async def propagate(path: str, data: dict, ignore_node_id: str = None, db: Datab
                 try:
                     ni = NodeInterface(peer_info['url'], client=http_client, db=db)
                     
-                    if p == 'submit_block':
-                        response = await ni.submit_block(d)
+                    if p == 'push_block':
+                        response = await ni.push_block(d)
                     elif p == 'push_tx':
                         response = await ni.push_tx(d['tx_hex'])
                     
@@ -1058,7 +1083,7 @@ async def _push_sync_to_peer(peer_info: dict, start_block: int, db_conn: Databas
                 logger.warning(f"[PUSH-SYNC] Could not form a batch for {peer_id} without exceeding size limits. Halting.")
                 return
 
-            response = await node_interface.submit_blocks(payload_batch)
+            response = await node_interface.push_blocks(payload_batch)
             
             if not response or not response.get('ok'):
                 error_msg = response.get('error', '')
@@ -1098,7 +1123,7 @@ async def _push_sync_to_peer(peer_info: dict, start_block: int, db_conn: Databas
             try:
                 # Recreate the interface to be safe within the finally block
                 final_interface = NodeInterface(peer_info['url'], client=http_client, db=db_conn)
-                final_response = await final_interface.submit_block(trigger_data)
+                final_response = await final_interface.push_block(trigger_data)
                 logger.debug(f"[PUSH-SYNC] Final submission response for block {trigger_data.get('id')} from {peer_id}: {final_response}")
             
             except httpx.RequestError:
@@ -1189,6 +1214,7 @@ async def get_verified_sender(request: Request):
     
     peer_url = request.headers.get('x-peer-url')
     pubkey = request.headers.get('x-public-key')
+    peer_version = request.headers.get('x-node-version')
     
     is_unknown = NodesManager.get_peer(peer_id) is None
     
@@ -1206,7 +1232,7 @@ async def get_verified_sender(request: Request):
                     peer_id, 'invalid_url', severity=3
                 )
         
-        if NodesManager.add_or_update_peer(peer_id, pubkey, url_to_store, is_peer_public):
+        if NodesManager.add_or_update_peer(peer_id, pubkey, url_to_store, is_peer_public, version=peer_version):
             logger.info(f"Discovered new {'public' if is_peer_public else 'private'} peer {peer_id} from their incoming request.")
 
     NodesManager.update_peer_last_seen(peer_id)
@@ -1249,6 +1275,7 @@ async def do_handshake_with_peer(peer_url_to_connect: str):
         peer_pubkey = challenge_data.get('pubkey')
         peer_is_public = challenge_data.get('is_public')
         peer_advertised_url = challenge_data.get('url')
+        peer_version = challenge_data.get('node_version')
         peer_height = challenge_data.get('height', -1)
 
         if not all([challenge, peer_id, peer_pubkey, peer_is_public is not None]):
@@ -1258,7 +1285,7 @@ async def do_handshake_with_peer(peer_url_to_connect: str):
         # Add or update the peer in our manager AS SOON as we have their info.
         # This makes them "known" before we attempt any sync logic.
         url_to_store = peer_advertised_url if peer_is_public and peer_advertised_url else peer_url_to_connect
-        if NodesManager.add_or_update_peer(peer_id, peer_pubkey, url_to_store, peer_is_public):
+        if NodesManager.add_or_update_peer(peer_id, peer_pubkey, url_to_store, peer_is_public, version=peer_version):
             logger.info(f"Handshake Phase 1: Discovered and added new {'public' if peer_is_public else 'private'} peer {peer_id}")
         else:
             logger.debug(f"Handshake Phase 1: Discovered and updated {'public' if peer_is_public else 'private'} peer {peer_id}")
@@ -1404,7 +1431,7 @@ async def check_own_reachability():
     await asyncio.sleep(10)
 
     if not DENARO_SELF_URL:
-        logger.info("DENARO_SELF_URL not set. Assuming this is a private node.")
+        logger.info("DENARO_SELF_URL not set. Operating as a private node.")
         NodesManager.set_public_status(False)
         return
 
@@ -1414,7 +1441,7 @@ async def check_own_reachability():
         NodesManager.set_public_status(False)
         return
 
-    logger.info(f"Potential public URL is {DENARO_SELF_URL}. Asking bootstrap node to verify")
+    logger.info(f"Potential public URL is {DENARO_SELF_URL}. Asking bootstrap node to verify reachability.")
     bootstrap_interface = NodeInterface(DENARO_BOOTSTRAP_NODE, client=http_client, db=db)
     
     try:
@@ -1422,23 +1449,24 @@ async def check_own_reachability():
         if is_reachable:
             self_is_public = True
             NodesManager.set_public_status(True)
-            logger.info(f"SUCCESS: Node confirmed to be publicly reachable at {DENARO_SELF_URL}")
+            logger.info(f"Node confirmed to be publicly reachable at {DENARO_SELF_URL}")
         else:
             self_is_public = False
             NodesManager.set_public_status(False)
-            logger.warning(f"DENARO_SELF_URL is set to {DENARO_SELF_URL}, but it was not reachable by the bootstrap node. Operating as a private node.")
+            logger.info(f"DENARO_SELF_URL is set to {DENARO_SELF_URL}, but it was not reachable by the bootstrap node. Operating as a private node.")
     
 
     except httpx.RequestError:
         # The bootstrap node is unreachable. We can't verify, so we must assume we are private.
         self_is_public = False
         NodesManager.set_public_status(False)
-        logger.warning(f"Bootstrap node at {DENARO_BOOTSTRAP_NODE} is unreachable. Assuming this is a private node.")
+        logger.info(f"Bootstrap node at {DENARO_BOOTSTRAP_NODE} is unreachable. Operating as a private node.")
     
     except Exception as e:
         self_is_public = False
         NodesManager.set_public_status(False)
-        logger.error(f"Failed to verify reachability with bootstrap node. Assuming private. Error: {e}")
+        logger.info("Failed to verify reachability with bootstrap node. Operating as a private node.")
+        logger.error(e)
 
 
 async def periodic_update_fetcher():
@@ -1807,9 +1835,8 @@ async def shutdown():
 
 @app.exception_handler(Exception)
 async def unhandled_exception_handler(request: Request, exc: Exception):
-    logger.error(f"Unhandled exception: {exc}")
-    import traceback
-    traceback.print_exc()
+    logger.critical(f"Unhandled exception: {exc}")
+    logger.debug(traceback.format_exc())
     
     await security.security_monitor.log_event('unhandled_exception', {
         'endpoint': request.url.path,
@@ -1858,7 +1885,19 @@ async def middleware(request: Request, call_next):
 
 @app.get("/")
 async def root():
-    return {"node_version": NODE_VERSION, "unspent_outputs_hash": await db.get_unspent_outputs_hash()}
+    """
+    Root endpoint that returns the node version, github repository, and API documentation URL.<br>
+    
+    - Returns:
+      - dict: Contains 'node_version', 'github_repository', and 'api_docs'.
+    """
+    api_docs_url = f"{DENARO_SELF_URL}/docs" if DENARO_SELF_URL else None
+    result = {
+        "node_version": NODE_VERSION,
+        "github_repository": "https://github.com/The-Sycorax/denaro",
+        "api_docs": api_docs_url
+    }
+    return result
 
 
 @app.post("/push_tx")
@@ -1869,6 +1908,18 @@ async def push_tx(
     body: dict = Body(...),
     verified_sender: str = Depends(get_verified_sender)
 ):
+    """
+    Authenticated endpoint to receive a transaction from a verified peer.<br>
+    
+    Validates the transaction structure and content. If valid and new, adds it to the<br>
+    local mempool and propagates it to other peers.<br>
+
+    - Returns:
+      - dict: Success status and result message or error.
+    
+    - Raises:
+      - HTTPException: If sender is unverified, tx is missing, or validation fails.
+    """
     if not verified_sender:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Signed request required.")
 
@@ -1913,6 +1964,7 @@ async def push_tx(
     
     try:
         if await security.transaction_pool.add_transaction(tx.hash(), tx, db):
+            logger.info(f"Accepted transaction {tx.hash()} from external client. Propagating to network.")
             background_tasks.add_task(
                 propagate, 'push_tx', {'tx_hex': tx_hex}, 
                 ignore_node_id=verified_sender
@@ -1931,61 +1983,26 @@ async def push_tx(
         return {'ok': False, 'error': 'Transaction rejected'}
 
 
-@app.post("/submit_tx")
-@limiter.limit("30/minute") 
-async def submit_tx(
-    request: Request, 
-    background_tasks: BackgroundTasks,
-    body: dict = Body(...)
-):
-    tx_hex = body.get('tx_hex')
-    if not tx_hex:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="'tx_hex' not found in body.")
-
-    is_valid, error_msg = security.input_validator.validate_transaction_data(tx_hex)
-    if not is_valid:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=error_msg)
-
-    try:
-        tx = await Transaction.from_hex(tx_hex)
-        
-        # Verify the transaction before accepting it.
-        if not await tx.verify():
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Transaction verification failed.")
-        
-    except Exception as e:
-        # Catch verification errors or deserialization errors
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Invalid transaction: {e}")
-
-    if await security.transaction_cache.contains(tx.hash()):
-        return {'ok': False, 'error': 'Transaction recently seen'}
-
-    pending_count = await db.get_pending_transaction_count()
-    if pending_count >= MAX_MEMPOOL_SIZE:
-        return {'ok': False, 'error': 'Mempool is full'}
-
-    try:
-        if await security.transaction_pool.add_transaction(tx.hash(), tx, db):
-            logger.info(f"Accepted transaction {tx.hash()} from external client. Propagating to network...")
-            background_tasks.add_task(propagate, 'push_tx', {'tx_hex': tx_hex}, ignore_node_id=None)
-            await security.transaction_cache.put(tx.hash(), True)
-            return {'ok': True, 'result': 'Transaction has been accepted'}
-        else:
-            return {'ok': False, 'error': 'Transaction failed validation'}
-    except UniqueViolationError:
-        return {'ok': False, 'error': 'Transaction already present in pending pool'}
-    except Exception as e:
-        return {'ok': False, 'error': 'Transaction rejected'}
-
-
-@app.post("/push_block")
+@app.post("/submit_block")
 @limiter.limit("12/minute")
-async def push_block(
+async def submit_block(
     request: Request,
     background_tasks: BackgroundTasks,
     body: dict = Body(...),
 ):
-    """Unauthenticated endpoint for miners with heavy validation"""
+    """
+    Endpoint that is used by miners to submit a newly mined block.<br>
+    
+    This endpoint accepts blocks without a peer signature (as miners might not be<br>
+    full nodes). Performs heavy validation on block content, difficulty, and<br>
+    transactions. If valid, the block is appended to the chain and propagated.<br>
+
+    - Returns:
+      - dict: Success status and result message or error.
+
+    - Raises:
+      - HTTPException: If block data is missing, too large, or invalid.
+    """
     
     block_content = body.get('block_content')
     if not block_content:
@@ -2057,18 +2074,90 @@ async def push_block(
         logger.info(f"Accepted block {block_no} from miner at {miner_ip}. Propagating to network...")
         
         # Propagate to all peers
-        background_tasks.add_task(propagate, 'submit_block', body, ignore_node_id=None, db=db) 
+        background_tasks.add_task(propagate, 'push_block', body, ignore_node_id=None, db=db) 
         return {'ok': True, 'result': f'Block {block_no} accepted.'}
 
 
-@app.post("/submit_block")
+@app.post("/submit_tx")
+@limiter.limit("30/minute") 
+async def submit_tx(
+    request: Request, 
+    background_tasks: BackgroundTasks,
+    body: dict = Body(...)
+):
+    """
+    Endpoint for submitting a transaction (e.g., from a wallet).<br>
+
+    - Returns:
+      - dict: Success status and result message or error.
+
+    - Raises:
+      - HTTPException: If validation fails.
+    """
+    tx_hex = body.get('tx_hex')
+    if not tx_hex:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="'tx_hex' not found in body.")
+
+    is_valid, error_msg = security.input_validator.validate_transaction_data(tx_hex)
+    if not is_valid:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=error_msg)
+
+    try:
+        tx = await Transaction.from_hex(tx_hex)
+        
+        # Verify the transaction before accepting it.
+        if not await tx.verify():
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Transaction verification failed.")
+        
+    except Exception as e:
+        # Catch verification errors or deserialization errors
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Invalid transaction: {e}")
+
+    if await security.transaction_cache.contains(tx.hash()):
+        return {'ok': False, 'error': 'Transaction recently seen'}
+
+    pending_count = await db.get_pending_transaction_count()
+    if pending_count >= MAX_MEMPOOL_SIZE:
+        return {'ok': False, 'error': 'Mempool is full'}
+
+    try:
+        if await security.transaction_pool.add_transaction(tx.hash(), tx, db):
+            logger.info(f"Accepted transaction {tx.hash()} from external client. Propagating to network...")
+            background_tasks.add_task(propagate, 'push_tx', {'tx_hex': tx_hex}, ignore_node_id=None)
+            await security.transaction_cache.put(tx.hash(), True)
+            return {'ok': True, 'result': 'Transaction has been accepted'}
+        else:
+            return {'ok': False, 'error': 'Transaction failed validation'}
+    except UniqueViolationError:
+        return {'ok': False, 'error': 'Transaction already present in pending pool'}
+    except Exception as e:
+        return {'ok': False, 'error': 'Transaction rejected'}
+
+
+
+
+
+@app.post("/push_block")
 @limiter.limit("20/minute")
-async def submit_block(
+async def push_block(
     request: Request,
     background_tasks: BackgroundTasks,
     body: dict = Body(...),
     verified_sender: str = Depends(get_verified_sender)
 ):
+    """
+    Authenticated endpoint to receive a block from a verified peer.<br>
+    
+    Validates block content, difficulty, and transactions. If valid, the block is<br>
+    appended to the chain and propagated to other peers.<br>
+
+    - Returns:
+      - dict: Success status and result message or error.
+
+    - Raises:
+      - HTTPException: If sender is unverified, block is missing, or validation fails.
+    """
+        
     if not verified_sender:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Signed request required.")
 
@@ -2171,19 +2260,30 @@ async def submit_block(
         
         logger.info(f"Accepted block {block_no} from {verified_sender}. Propagating to network...")
         background_tasks.add_task(
-            propagate, 'submit_block', body, 
+            propagate, 'push_block', body, 
             ignore_node_id=verified_sender, db=db
         )
         return {'ok': True, 'result': f'Block {block_no} accepted.'}
         
 
-@app.post("/submit_blocks")
+@app.post("/push_blocks")
 @limiter.limit("5/minute")
-async def submit_blocks(
+async def push_blocks(
     request: Request,
     body: list = Body(...),
     verified_sender: str = Depends(get_verified_sender)
 ):
+    """
+    Authenticated endpoint to receive multiple blocks in a single batch from a verified peer (used for sync operations).<br>
+    
+    Validates and processes a sequence of blocks. Unlike /push_block, this endpoint<br>
+    does NOT propagate blocks (they are already being pushed from a syncing peer).<br>
+    Blocks must be submitted in continuous sequence.<br>
+
+    - Returns:
+      - dict: Success status with count of processed blocks or error message.
+    """
+        
     if not verified_sender:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Signed request required.")
 
@@ -2276,33 +2376,29 @@ async def submit_blocks(
         raise
 
 
-@app.post("/get_peers")
-async def get_peers(verified_sender: str = Depends(get_verified_sender)):
-    if not verified_sender:
-        raise HTTPException(status.HTTP_403_FORBIDDEN, "Signed request required.")
-    
-    peers_list = [
-        {'node_id': peer_id, **peer_data} 
-        for peer_id, peer_data in NodesManager.peers.items()
-        # Only share peers that haven't been banned
-        if not await security.reputation_manager.is_banned(peer_id)
-    ]
-    return {"ok": True, "result": {"peers": peers_list}}
-
-
 @app.get("/handshake/challenge")
 @limiter.limit("30/minute")
-async def handshake_challenge(request: Request):
+async def handshake_challenge(request: Request, pretty: FlagParameter = Query(default=False, description="Formats JSON output for readability response")):
     """
-    Provides a challenge and also advertises this node's current chain state.
+    Initiates a handshake with another node.<br>
+    
+    This is the first step of the handshake protocol. The responder uses the challenge<br>
+    to sign their response and prove their identity. This endpoint advertises the node's ID,<br>
+    public key, whether it is public or private, URL, current height, and last block hash.<br>
+
+    - Parameters:
+      - pretty (flag): Formats JSON output for readability response.
+
+    - Returns:
+      - Response: JSON response with challenge, node_id, public key, and chain state.
     """
     challenge = await security.handshake_manager.create_challenge()
-    
+
     # Get our current chain state to send to the peer.
     height = await db.get_next_block_id() - 1
     last_block = await db.get_block_by_id(height) if height > -1 else None
     
-    return {
+    result = {
         "ok": True, 
         "result": {
             "challenge": challenge,
@@ -2310,11 +2406,13 @@ async def handshake_challenge(request: Request):
             "pubkey": get_public_key_hex(),
             "is_public": NodesManager.self_is_public,
             "url": DENARO_SELF_URL,
+            "node_version": NODE_VERSION,
             "height": height,
             "last_hash": last_block['hash'] if last_block else None
         }
     }
-
+    
+    return Response(content=json.dumps(result, indent=2, cls=CustomJSONEncoder), media_type="application/json") if pretty else result
 
 
 @app.post("/handshake/response")
@@ -2325,8 +2423,19 @@ async def handshake_response(
     verified_sender: str = Depends(get_verified_sender)
 ):
     """
-    Verifies a handshake response and uses the peer's advertised chain state to
-    negotiate a sync. This is the server-side of the handshake negotiation.
+    Authenticated endpoint that is used to complete a handshake, negotiate synchronization, and for other communications between nodes.<br>
+
+    Verifies the peer's signature on the challenge.<br>
+    Compares chain heights to determine if a sync (PUSH or PULL) is needed.<br>
+
+    - Returns:
+      - JSONResponse:
+        - 200 OK with 'sync_requested' if we need the peer to push blocks to us.
+        - 409 Conflict with 'sync_required' if the peer needs to pull from us.
+        - 200 OK if fully synced.
+            
+    - Raises:
+      - HTTPException: If challenge is invalid/expired or signature is missing.
     """
     if not verified_sender:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Signed request required.")
@@ -2392,7 +2501,16 @@ async def handshake_response(
 @app.get("/sync_blockchain")
 @limiter.limit("10/minute")
 async def sync(request: Request, node_id: str = None): 
-    """Initiates a blockchain synchronization process"""
+    """
+    Manually triggers the blockchain synchronization process on the node.<br>
+    Allows a specific peer to be specified via `node_id`.<br>
+
+    - Parameters:
+      - node_id (str, optional): Specific node ID to sync from. Defaults to random peer.
+
+    - Returns:
+      - JSONResponse: Confirmation that sync has started.
+    """
     if security.sync_state_manager.is_syncing:
         return {'ok': False, 'error': 'Node is already syncing'}
     
@@ -2406,22 +2524,27 @@ async def sync(request: Request, node_id: str = None):
 
 
 @app.get("/get_mining_info")
-@limiter.limit("15/minute")
+@limiter.limit("60/minute")
 async def get_mining_info(
     request: Request,
     background_tasks: BackgroundTasks,
-    pretty: bool = False,
-    debug: bool = False,
+    pretty: FlagParameter = Query(default=False, description="Formats JSON output for readability"),
+    debug: FlagParameter = Query(default=False, description="Include debug info about transaction selection"),
 ):
     """
-    Build a block template from the full mempool:
-      - Load ALL pending transaction hashes from the DB (no hidden filters).
-      - Deserialize those transactions.
-      - Topologically select valid, non-conflicting txs (parents first), so
-        multiple independent txs and parent+child chains can be included in
-        the same block.
-      - Return selected tx hexes and hashes, merkle root, and optional debug.
+    Generates and returns a block template that is used by miners to create new blocks.<br>
+    
+    Constructs a candidate block by selecting valid transactions from the mempool.<br>
+    Handles dependencies (parents before children) and maximizes fee/size efficiency.<br>
+
+    - Parameters:
+      - pretty (flag): Formats JSON output for readability.
+      - debug (flag): Include debug info about transaction selection.
+
+    - Returns:
+      - Response: JSON with mining template (difficulty, last_block, pending_transactions, merkle_root).
     """
+    
 
     # Recompute difficulty/tip
     Manager.difficulty = None
@@ -2435,7 +2558,6 @@ async def get_mining_info(
         logger.warning(f"Mempool size ({pending_count}) exceeds limit of ({MAX_MEMPOOL_SIZE}). Triggering cleanup.")
         await clear_pending_transactions([])
 
-    # === Load ALL mempool transactions by hash, then hydrate ===
     # This avoids whatever filtering/ordering get_pending_transactions_limit() was doing.
     try:
         all_hashes = await db.get_all_pending_transaction_hashes()  # returns List[str]
@@ -2451,7 +2573,6 @@ async def get_mining_info(
     order_index = {h: i for i, h in enumerate(all_hashes)}
 
     # Fetch full tx objects for these hashes
-    # This DB API exists in your code (used in /submit_block, etc.)
     pending_tx_objects = await db.get_pending_transactions_by_hash(all_hashes)
 
     # Build a hash -> Transaction map and drop unknowns (shouldn't happen, but be safe)
@@ -2460,7 +2581,7 @@ async def get_mining_info(
         try:
             tx_by_hash[tx.hash()] = tx
         except Exception:
-            # If a deserialization glitch happens, skip the tx
+            # If deserialization happens, skip the tx
             continue
 
     # Only keep hashes we could hydrate
@@ -2480,7 +2601,7 @@ async def get_mining_info(
                 'merkle_root': merkle_root,
             }
         }
-        return Response(content=json.dumps(result, indent=4, cls=CustomJSONEncoder), media_type="application/json") if pretty else result
+        return Response(content=json.dumps(result, indent=2, cls=CustomJSONEncoder), media_type="application/json") if pretty else result
 
     # Debug info per tx
     debug_rows = {}  # h -> dict
@@ -2704,13 +2825,31 @@ async def get_mining_info(
 @limiter.limit("8/second")
 async def get_address_info(
     request: Request, 
-    address: str, 
-    transactions_count_limit: int = Query(default=5, le=50), 
-    page: int = Query(default=1, ge=1), 
-    show_pending: bool = False, 
-    verify: bool = False, 
-    pretty: bool = False
+    address: str = Query(..., description="The wallet address to query"),
+    transactions_count_limit: int = Query(default=5, le=50, description="Number of transactions per page (max 50)"), 
+    page: int = Query(default=1, ge=1, description="Page number for pagination"),
+    show_pending: FlagParameter = Query(default=False, description="Include pending (mempool) transactions"),
+    verify: FlagParameter = Query(default=False, description="Perform extra verification on returned transactions"),
+    pretty: FlagParameter = Query(default=False, description="Formats JSON output for readability"),
 ):
+    """
+    Returns balance and transaction history for a specific address.<br>
+    
+    - Parameters:
+      - address (str): The wallet address to query.
+      - transactions_count_limit (int): Number of transactions per page (max 50).
+      - page (int): Page number for pagination.
+      - show_pending (flag): Include pending (mempool) transactions.
+      - verify (flag): Perform extra verification on returned transactions.
+      - pretty (flag): Formats JSON output for readability.
+
+    - Returns:
+      - Response: JSON with balance, spendable outputs, and transaction history.
+
+    - Raises:
+      - HTTPException: If address format is invalid or rate limit (query cost) exceeded.
+    """
+    
     # Validate address format
     if not security.input_validator.validate_address(address):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Invalid address format")
@@ -2748,74 +2887,101 @@ async def get_address_info(
         'pending_spent_outputs': await db.get_address_pending_spent_outputs(address) if show_pending else None
     }}
     
-    if pretty:
-        return Response(
-            content=json.dumps(result, indent=4, cls=CustomJSONEncoder), 
-            media_type="application/json"
-        )
-    return result
-
-
-@app.get("/get_nodes")
-async def get_nodes(pretty: bool = False):
-    # Don't reveal all internal peer information, only public nodes
-    public_peers = [
-        {
-            'node_id': p['node_id'],
-            'is_public': p.get('is_public', False),
-            'url': p.get('url') if p.get('is_public') else None,
-            'reputation_score': await security.reputation_manager.get_score(p['node_id'])
-        }
-        for p in NodesManager.get_recent_nodes()[:100]
-        if p.get('is_public', False) and not await security.reputation_manager.is_banned(p['node_id'])
-    ]
-    result = {'ok': True, 'result': public_peers}
-    return Response(content=json.dumps(result, indent=4, cls=CustomJSONEncoder), media_type="application/json") if pretty else result
+    return Response(content=json.dumps(result, indent=2, cls=CustomJSONEncoder), media_type="application/json") if pretty else result
 
 
 @app.get("/get_pending_transactions")
-async def get_pending_transactions(pretty: bool = False):
+@limiter.limit("8/second")
+async def get_pending_transactions(request: Request, pretty: FlagParameter = Query(default=False, description="Formats JSON output for readability")):
+    """
+    Returns the hex representation of transactions in the local mempool.<br>
+    
+    Data is limited to the first 1024 transactions to prevent huge responses.<br>
+
+    - Parameters:
+      - pretty (flag): Formats JSON output for readability.
+
+    - Returns:
+      - Response: JSON list of transaction hex strings.
+    """
     result = {'ok': True, 'result': [tx.hex() for tx in await db.get_pending_transactions_limit(1024)]}
-    return Response(content=json.dumps(result, indent=4, cls=CustomJSONEncoder), media_type="application/json") if pretty else result
+    return Response(content=json.dumps(result, indent=2, cls=CustomJSONEncoder), media_type="application/json") if pretty else result
 
 
 @app.get("/get_transaction")
 @limiter.limit("8/second")
-async def get_transaction(request: Request, tx_hash: str, verify: bool = False, pretty: bool = False):
+async def get_transaction(request: Request,
+                          hash: str = Query(..., description="The 64-char hex hash of the transaction"),
+                          pretty: FlagParameter = Query(default=False, description="Formats JSON output for readability")):
+    """
+    Returns a specific transaction by its hash.<br>
+    
+    - Parameters:
+      - hash (str): The 64-char hex hash of the transaction.
+      - pretty (flag): Formats JSON output for readability.
+
+    - Returns:
+      - Response: JSON with transaction data or error if not found.
+
+    - Raises:
+      - HTTPException: If hash format is invalid.
+    """
     # Validate transaction hash format
-    if not security.input_validator.validate_hex(tx_hash, min_length=64, max_length=64):
+    if not security.input_validator.validate_hex(hash, min_length=64, max_length=64):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Invalid transaction hash format")
-        
-    tx = await db.get_nice_transaction(tx_hash)
+    tx = await db.get_nice_transaction(hash)
     if tx is None:
         result = {'ok': False, 'error': 'Not found'}
     else:
         result = {'ok': True, 'result': tx}
-    return Response(content=json.dumps(result, indent=4, cls=CustomJSONEncoder), media_type="application/json") if pretty else result
+    return Response(content=json.dumps(result, indent=2, cls=CustomJSONEncoder), media_type="application/json") if pretty else result
 
 
 @app.get("/get_block")
-@limiter.limit("30/minute")
-async def get_block(request: Request, block: str, full_transactions: bool = False, pretty: bool = False):
-    # Validate block parameter
+@limiter.limit("60/minute")
+async def get_block(
+    request: Request, 
+    id: Optional[int] = Query(default=None, description="Block height (integer)"),
+    hash: Optional[str] = Query(default=None, description="Block Hash (hex string)"),
+    full_transactions: FlagParameter = Query(default=False, description="Returns full transaction objects instead of just hex/hashes"),
+    pretty: FlagParameter = Query(default=False, description="Formats JSON output for readability"),
+):
+    """
+    Returns a block by its ID (height) or hash.<br>
+        
+    - Parameters:
+      - id (int): Block height (integer).
+      - hash (str): Block Hash (hex string).
+      - full_transactions (flag): Returns full transaction objects instead of just hex/hashes.
+      - pretty (flag): Formats JSON output for readability.
+
+    - Returns:
+      - Response: JSON with block header and transaction data.
+
+    - Raises:
+      - HTTPException: If id or hash format is invalid.
+    """
+    
+    # Validate block parameter - must provide either id or hash
+    if id is None and not hash:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Must provide either 'id' (block height) or 'hash' (block hash)")
+    
     block_info = None
     block_hash = None
 
-    # Validate block parameter
-    if block.isdecimal():
-        block_id = int(block)
-        if not await security.input_validator.validate_block_height(block_id, db, max_ahead=0):
+    if id is not None:
+        if not await security.input_validator.validate_block_height(id, db, max_ahead=0):
             raise HTTPException(status.HTTP_400_BAD_REQUEST, "Invalid block height")
         
-        block_info = await db.get_block_by_id(block_id)
+        block_info = await db.get_block_by_id(id)
         if block_info:
             block_hash = block_info['hash']
-
+            
     else:
-        if not security.input_validator.validate_hex(block, min_length=64, max_length=64):
+        if not security.input_validator.validate_hex(hash, min_length=64, max_length=64):
             raise HTTPException(status.HTTP_400_BAD_REQUEST, "Invalid block hash format")
         
-        block_hash = block
+        block_hash = hash
         block_info = await db.get_block(block_hash)
         
     if block_info:
@@ -2827,62 +2993,172 @@ async def get_block(request: Request, block: str, full_transactions: bool = Fals
     else:
         result = {'ok': False, 'error': 'Not found'}
     
-    if pretty:
-        return Response(content=json.dumps(result, indent=4, cls=CustomJSONEncoder), media_type="application/json")
-    return result
+    return Response(content=json.dumps(result, indent=2, cls=CustomJSONEncoder), media_type="application/json") if pretty else result
 
 
 @app.get("/get_blocks")
-@limiter.limit("10/minute")
+@limiter.limit("60/minute")
 async def get_blocks(
     request: Request, 
-    offset: int = Query(default=..., ge=0), 
-    limit: int = Query(default=..., le=512), 
-    pretty: bool = False
+    offset: int = Query(default=..., ge=0, description="Starting block height/index"), 
+    limit: int = Query(default=..., le=512, description="Number of blocks to retrieve (max 512)"),
+    pretty: FlagParameter = Query(default=False, description="Formats JSON output for readability"),
 ):
+    """
+    Returns a range of blocks.<br>
+    
+    - Parameters:
+      - offset (int): Starting block height/index.
+      - limit (int): Number of blocks to retrieve (max 512).
+      - pretty (flag): Formats JSON output for readability.
+
+    - Returns:
+      - Response: JSON list of blocks.
+    """
     # Use QueryCostCalculator to prevent abuse of pagination
-    client_ip = get_remote_address(request)
-    await security.query_calculator.check_and_update_cost(client_ip, offset, limit)
+    #client_ip = get_remote_address(request)
+    #await security.query_calculator.check_and_update_cost(client_ip, offset, limit)
 
     blocks = await db.get_blocks(offset, limit)
     result = {'ok': True, 'result': blocks}
-    
-    if pretty:
-        return Response(content=json.dumps(result, indent=4, cls=CustomJSONEncoder), media_type="application/json")
-    return result
+    return Response(content=json.dumps(result, indent=2, cls=CustomJSONEncoder), media_type="application/json") if pretty else result
 
 
-@app.api_route("/get_status", methods=["GET", "HEAD"])
-async def get_status():
+@app.get("/get_status")
+@limiter.limit("60/minute")
+async def get_status(request: Request, pretty: FlagParameter = Query(default=False, description="Formats JSON output for readability")):
     """
-    Returns the current block height, last block hash, and the node's ID.
+    Returns the general status of the node including blockchain state and node metadata.<br>
+    
+    - Parameters:
+      - pretty (flag): Formats JSON output for readability.
+
+    - Returns:
+      - Response: JSON object with node_id, pubkey, height, last_block_hash, is_public, url, 
+                  node_type, uptime_seconds, and sync_status.
     """
     try:
         height = await db.get_next_block_id() - 1
-
         # Create a base response object that always includes the node's ID.
         response_data = {
+            'node_id': self_node_id,
+            'pubkey': get_public_key_hex(),
+            'url': DENARO_SELF_URL,
+            'is_public': self_is_public,
+            "node_version": NODE_VERSION,
             'height': height,
             'last_block_hash': None,
-            'node_id': self_node_id # This is the key addition
+            'uptime_seconds': int(time.time() - startup_time),
         }
-        
+
         if height >= 0:
             last_block = await db.get_block_by_id(height)
             if last_block:
                 # If a block exists, add its hash to the response.
                 response_data['last_block_hash'] = last_block['hash']
             else:
-                # This handles a rare edge case where the DB might be inconsistent.
+                # This handles an edge case where the DB might be inconsistent.
                 # We report height as -1 to signal a non-ready state.
                 response_data['height'] = -1
 
-        return {'ok': True, 'result': response_data}
-        
+        result = {'ok': True, 'result': response_data}
+
     except Exception as e:
         logger.error(f"Error in /get_status: {e}")
         await security.security_monitor.log_event('get_status_error', {'error': str(e)})
-        return {'ok': False, 'error': 'Internal server error'}
+        result = {'ok': False, 'error': 'Internal server error'}
+    
+    return Response(content=json.dumps(result, indent=2, cls=CustomJSONEncoder), media_type="application/json") if pretty else result
+
+
+@app.get("/get_peers")
+@limiter.limit("60/minute")
+async def get_peers(
+    request: Request,
+    private: FlagParameter = Query(default=False, description="Only return private peers"),
+    public: FlagParameter = Query(default=False, description="Only return public peers"),
+    show_banned: FlagParameter = Query(default=False, description="Include banned peers"),
+    show_stats: FlagParameter = Query(default=False, description="Include peer statistics"),
+    pretty: FlagParameter = Query(default=False, description="Formats JSON output for readability"),
+):
+    """
+    Returns a list of active peers, peer statistics, and reputation status.<br>
+
+    - Parameters:
+      - private (flag): Only return private peers.
+      - public (flag): Only return public peers.
+      - show_banned (flag): Include banned peers.
+      - show_stats (flag): Include peer statistics.
+      - pretty (flag): Formats JSON output for readability.
+
+    - Returns:
+      - dict: Contains a list of peer objects (node_id, pubkey, url, last_seen timestamp).<br>
+              If show_stats is present, each peer object also includes reputation_score and is_banned,<br>
+              and the response includes peer_stats with total_peers, public_peers, private_peers,<br>
+              connectable_peers, and recent_peers.<br>
+    """
+    peers_list = []
+    for peer_id, peer_data in NodesManager.peers.items():
+
+        # Filter by public/private based on query parameters
+        # If only public is specified, only return public peers
+        if public and not private:
+            if not peer_data.get('is_public'):
+                continue
+
+        # If only private is specified, only return private peers
+        elif private and not public:
+            if peer_data.get('is_public'):
+                continue
+
+        # Only return peers that haven't been banned
+        is_banned = await security.reputation_manager.is_banned(peer_id)
+        if is_banned and not show_banned:
+            continue
+        
+        reputation_score = await security.reputation_manager.get_score(peer_id)
+
+        peer_url = peer_data.get('url')
+
+        peer_version = peer_data.get('node_version')
+        
+        peer_info = {
+            'node_id': peer_id,
+            'pubkey': peer_data.get('pubkey'),
+            'url': peer_url if peer_url else None,
+            'is_public': peer_data.get('is_public'),
+            'node_version': peer_version if peer_version else None,
+            'reputation_score': reputation_score        
+        }
+
+        if show_banned:
+            peer_info['is_banned'] = is_banned  
+        
+        peer_info['last_seen'] = peer_data.get('last_seen')
+
+        peers_list.append(peer_info)
+    
+    result = {"ok": True, "result": {"peers": peers_list}}
+    
+    # Include peer statistics if requested
+    if show_stats:
+        try:
+            # Get peer information and statistics (includes all peers, even banned ones for stats)
+            all_peers = NodesManager.get_all_peers()
+            
+            peer_stats = {
+                'total_peers': len(all_peers),
+                'public_peers': len([p for p in all_peers if p.get('is_public', False)]),
+                'private_peers': len([p for p in all_peers if not p.get('is_public', False)]),
+                'connectable_peers': len([p for p in all_peers if p.get('url')]),
+                'recent_peers': len([p for p in all_peers if time.time() - p.get('last_seen', 0) < 3600])
+            }
+            
+            result["result"]["peer_stats"] = peer_stats
+        except Exception as e:
+            logger.error(f"Error calculating peer stats in /get_peers: {e}")
+    
+    return Response(content=json.dumps(result, indent=2, cls=CustomJSONEncoder), media_type="application/json") if pretty else result
 
 
 @app.post("/check_reachability")
@@ -2893,8 +3169,13 @@ async def check_reachability(
     verified_sender: str = Depends(get_verified_sender)
 ):
     """
-    A SECURED endpoint for a peer to ask us to check if they are reachable at a given URL.
-    This endpoint is secured against SSRF, anonymous abuse, and DoS amplification.
+    Checks if a given URL is reachable from this node.<br>
+    
+    Used by peers to verify their own public reachability (NAT traversal check).<br>
+    Secured to prevent SSRF: only allows global IPs and caches results.<br>
+
+    - Returns:
+      - dict: {'ok': True, 'result': {'reachable': bool, 'cached': bool}}
     """
     if not verified_sender:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Signed request required.")
@@ -2933,7 +3214,13 @@ async def check_reachability(
 @app.post("/get_mempool_hashes")
 async def get_mempool_hashes(verified_sender: str = Depends(get_verified_sender)):
     """
-    Returns a list of all transaction hashes currently in the pending pool.
+    Authenticated endpoint to retrieve a list of all transaction hashes that are currently in the mempool.<br>
+    
+    - Parameters:
+      - pretty (bool): Whether to pretty-print JSON.
+
+    - Returns:
+      - Response: JSON list of transaction hashes.
     """
     if not verified_sender:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Signed request required.")
@@ -2950,7 +3237,13 @@ async def get_transactions_by_hash(
     verified_sender: str = Depends(get_verified_sender)
 ):
     """
-    Accepts a list of transaction hashes and returns the full transaction data.
+    Authenticated endpoint to retrieve full transaction data for a list of hashes.<br>
+    
+    - Returns:
+      - dict: List of transaction hex strings.
+        
+    - Raises:
+      - HTTPException: If list is missing, too large, or contains invalid hashes.
     """
     if not verified_sender:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Signed request required.")

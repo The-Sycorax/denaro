@@ -51,7 +51,7 @@ LOG_BACKUP_COUNT = 5
 # ==================================================================================
 # CORE PROTOCOL CONSTANTS
 # ==================================================================================
-NODE_VERSION = '2.0.1'
+NODE_VERSION = '2.0.2'
 ENDIAN = 'little'
 CURVE = curve.P256
 SMALLEST = 1000000  # Smallest unit divisor

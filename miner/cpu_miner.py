@@ -125,7 +125,7 @@ def run_miner(
                         'id': last_block_id + 1
                     }
                     timeout = 20 + int((len(txs) or 1) / 3)
-                    r = requests.post(f"{node_url}push_block", json=payload, timeout=timeout)
+                    r = requests.post(f"{node_url}submit_block", json=payload, timeout=timeout)
                     r.raise_for_status()
                     response = r.json()
 

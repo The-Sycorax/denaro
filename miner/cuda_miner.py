@@ -361,7 +361,7 @@ def submit_block(node_url: str, last_block_id: int, txs, block_content: bytes) -
             'id': last_block_id + 1
         }
         timeout = 20 + int((len(txs) or 1) / 3)
-        r = requests.post(f"{node_url}push_block", json=payload, timeout=timeout)
+        r = requests.post(f"{node_url}submit_block", json=payload, timeout=timeout)
         r.raise_for_status()
         response = r.json()
 

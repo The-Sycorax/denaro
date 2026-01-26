@@ -16,7 +16,8 @@ import httpx
 
 from ..constants import (
     ACTIVE_NODES_DELTA, MAX_PEERS_COUNT, DENARO_SELF_URL,
-    LOG_INCLUDE_REQUEST_CONTENT, LOG_INCLUDE_RESPONSE_CONTENT, LOG_MAX_PATH_LENGTH
+    LOG_INCLUDE_REQUEST_CONTENT, LOG_INCLUDE_RESPONSE_CONTENT, LOG_MAX_PATH_LENGTH,
+    NODE_VERSION
 )
 
 from .identity import get_node_id, get_public_key_hex, sign_message, get_canonical_json_bytes
@@ -173,7 +174,7 @@ class NodesManager:
             return None
 
     @staticmethod
-    def add_or_update_peer(node_id: str, pubkey: str, url: str | None, is_public: bool):
+    def add_or_update_peer(node_id: str, pubkey: str, url: str | None, is_public: bool, version: str | None = None):
         """
         Adds a new peer or updates an existing one's information.
         """
@@ -191,7 +192,8 @@ class NodesManager:
             'pubkey': pubkey,
             'url': url_to_store,
             'last_seen': int(time.time()),
-            'is_public': is_public
+            'is_public': is_public,
+            'node_version' : version
         }
         NodesManager.sync()
         return is_new
@@ -313,6 +315,7 @@ class NodeInterface:
             'x-signature': signature,
             'x-timestamp': str(current_time),
             'x-nonce': nonce,
+            'x-node-version': NODE_VERSION,
             'Content-Type': 'application/json'
         }
         
@@ -353,11 +356,11 @@ class NodeInterface:
     async def push_tx(self, tx_hex: str):
         return await self._signed_request('push_tx', {'tx_hex': tx_hex})
     
-    async def submit_block(self, block_data: dict):
-        return await self._signed_request('submit_block', block_data)
+    async def push_block(self, block_data: dict):
+        return await self._signed_request('push_block', block_data)
 
-    async def submit_blocks(self, blocks_payload: list):
-        return await self._signed_request("submit_blocks", blocks_payload)
+    async def push_blocks(self, blocks_payload: list):
+        return await self._signed_request("push_blocks", blocks_payload)
     
     async def get_block(self, block: str):
         return await NodesManager.request(self.client, f'{self.url}/get_block', params={'block': block})
@@ -369,7 +372,7 @@ class NodeInterface:
         return await NodesManager.request(self.client, f'{self.url}/get_status')
 
     async def get_peers(self):
-        return await self._signed_request('get_peers', method='POST')
+        return await NodesManager.request(self.client, f'{self.url}/get_peers', method='GET')
 
     async def handshake_challenge(self):
         """Initiates a handshake by asking for a challenge. Unsigned request."""

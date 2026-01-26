@@ -241,7 +241,7 @@ class LogManager:
                         }
                     )
 
-                    console = Console(theme=denaro_theme, highlight=False)
+                    console = Console(theme=denaro_theme, highlight=False, width=256, force_terminal=True)
 
                     rich_handler = RichHandler(
                         console=console,
