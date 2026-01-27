@@ -188,6 +188,22 @@ class NodesManager:
     
         url_to_store = url.strip('/') if url else None
         
+        # Temporary workaround to prevent peering with nodes running mismatched versions.
+        # NOTE: A version mismatch does not necessarily imply incompatibility. Nodes running different
+        # versions may still share compatible features. Therefore a better longterm solution needs to
+        # be implemented to determine compatibility (e.g. via negotiated capabilities) instead of just
+        # outright rejecting peers.
+        #  
+        # Also note that the advertised node version is not trustworthy. Meaning, there is nothing
+        # stopping nodes from simply spoofing their version string in order bypass this check. Any
+        # future implementation must account for this. One option is to negotiate explicit feature
+        # flags during the handshake, validate them where possible, and only enable features that
+        # either node actually supports. 
+        # 
+        # All of this is better said than done but is noted here for future reference.
+        if not version == NODE_VERSION:
+            return False
+        
         NodesManager.peers[node_id] = {
             'pubkey': pubkey,
             'url': url_to_store,
