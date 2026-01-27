@@ -56,7 +56,8 @@ from denaro.constants import (
     DENARO_BOOTSTRAP_NODE, DENARO_SELF_URL, POSTGRES_USER,
     POSTGRES_PASSWORD, DENARO_DATABASE_NAME, DENARO_DATABASE_HOST,
     MAX_TX_DATA_SIZE, DENARO_NODE_HOST, DENARO_NODE_PORT, MAX_REORG_DEPTH,
-    LOG_INCLUDE_REQUEST_CONTENT, LOG_INCLUDE_RESPONSE_CONTENT, LOG_MAX_PATH_LENGTH
+    LOG_INCLUDE_REQUEST_CONTENT, LOG_INCLUDE_RESPONSE_CONTENT, LOG_INCLUDE_BLOCK_SYNC_MESSAGES,
+    LOG_MAX_PATH_LENGTH
 )
 from denaro.node.identity import (
     initialize_identity, get_node_id, get_public_key_hex, 
@@ -2159,7 +2160,16 @@ async def push_block(
     """
         
     if not verified_sender:
+        # Quick workaround to add support for legacy miners that use the old endpoint name.
+        # Delegates request to submit_block which handles unauthenticated miner requests.
+        # A more secure solution may be needed for this in the future.
+        node_id = request.headers.get('x-node-id')
+        signature = request.headers.get('x-signature')
+        if not node_id or not signature:
+            return await submit_block(request, background_tasks, body)
+        
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Signed request required.")
+
 
     block_content = body.get('block_content')
     if not block_content:
@@ -2357,7 +2367,9 @@ async def push_blocks(
                         return {'ok': False, 'error': f'Block {block_no} failed validation. Halting.'}
                     
                     await security.block_cache.put(block_identifier, True)
-                    logger.info(f"Accepted block {block_no} from {verified_sender} via bulk sync.")
+                    
+                    if LOG_INCLUDE_BLOCK_SYNC_MESSAGES:
+                        logger.info(f"Accepted block {block_no} from {verified_sender} via bulk sync.")
 
                 # Reward successful bulk submission
                 await security.reputation_manager.record_good_behavior(
