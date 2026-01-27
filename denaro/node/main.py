@@ -3083,7 +3083,7 @@ async def get_status(request: Request, pretty: FlagParameter = Query(default=Fal
     return Response(content=json.dumps(result, indent=2, cls=CustomJSONEncoder), media_type="application/json") if pretty else result
 
 
-@app.get("/get_peers")
+@app.api_route("/get_peers", methods=["GET", "POST"])
 @limiter.limit("60/minute")
 async def get_peers(
     request: Request,
