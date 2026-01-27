@@ -45,7 +45,6 @@ from denaro.manager import (
 )
 
 from denaro.node.nodes_manager import NodesManager, NodeInterface
-from denaro.node.utils import ip_is_local
 from denaro.transactions import Transaction, CoinbaseTransaction
 from denaro import Database
 from denaro.constants import (
