@@ -75,7 +75,9 @@ volumes:
   node-topology:
   node-registry:
   node_3006_data:
-  postgres_data:
+  postgres_data: 
+    external: true 
+    name: docker_postgres_data
 
 networks:
   denaro-net:
