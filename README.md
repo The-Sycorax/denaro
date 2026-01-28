@@ -173,7 +173,8 @@ git clone https://github.com/The-Sycorax/denaro.git
 # Change directory to the cloned repository.
 cd denaro 
 
-docker-compose -f ./docker/docker-compose.yml up --build -d
+docker volume create denaro_postgres_data
+docker compose -f ./docker/docker-compose.yml up --build --force-recreate -d
 ```
 
 </dl></dd>

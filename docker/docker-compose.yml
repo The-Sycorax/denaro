@@ -77,7 +77,7 @@ volumes:
   node_3006_data:
   postgres_data: 
     external: true 
-    name: docker_postgres_data
+    name: denaro_postgres_data
 
 networks:
   denaro-net:
