@@ -380,7 +380,7 @@ class NodeInterface:
         return await self._signed_request("push_blocks", blocks_payload)
     
     async def get_block(self, block: str):
-        return await NodesManager.request(self.client, f'{self.url}/get_block', params={'block': block})
+        return await NodesManager.request(self.client, f'{self.url}/get_block', params={'id': block})
         
     async def get_blocks(self, offset: int, limit: int):
         return await NodesManager.request(self.client, f'{self.url}/get_blocks', params={'offset': offset, 'limit': limit})
