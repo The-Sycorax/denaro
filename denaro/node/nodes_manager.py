@@ -17,7 +17,7 @@ import httpx
 from ..constants import (
     ACTIVE_NODES_DELTA, MAX_PEERS_COUNT, DENARO_SELF_URL,
     LOG_INCLUDE_REQUEST_CONTENT, LOG_INCLUDE_RESPONSE_CONTENT, LOG_MAX_PATH_LENGTH,
-    NODE_VERSION
+    NODE_VERSION, ACTIVE_PEER_REGISTRY
 )
 
 from .identity import get_node_id, get_public_key_hex, sign_message, get_canonical_json_bytes
@@ -29,9 +29,10 @@ logger = get_logger(__name__)
 path = dirname(os.path.realpath(__file__)) + '/nodes.json'
 
 class NodesManager:
-    db_path = path
+    active_peer_registry = ACTIVE_PEER_REGISTRY
+    active_peers: dict = {}
+    
     self_id: str = None
-    peers: dict = None
     self_is_public: bool = False
 
     # The self-contained httpx.AsyncClient has been REMOVED from this class.
@@ -41,24 +42,24 @@ class NodesManager:
     def init(self_node_id: str):
         """Initializes the manager, loading peers from the JSON file."""
         NodesManager.self_id = self_node_id
-        if not exists(NodesManager.db_path):
-            NodesManager.purge_peers() # Corrected from self.purge_peers()
+        if not exists(NodesManager.active_peer_registry):
+            NodesManager.purge_active_peers()
         else:
-            with open(NodesManager.db_path, 'r') as f:
+            with open(NodesManager.active_peer_registry, 'r') as f:
                 data = json.load(f)
-                NodesManager.peers = data.get('peers', {})
+                NodesManager.active_peers = data.get('peers', {})
 
     @staticmethod
-    def purge_peers():
+    def purge_active_peers():
         """Clears the peer list and resets the JSON file."""
-        NodesManager.peers = {}
+        NodesManager.active_peers = {}
         NodesManager.sync()
     
     @staticmethod
     def sync():
         """Saves the current peer list to the JSON file."""
-        with open(NodesManager.db_path, 'w') as f:
-            json.dump({'peers': NodesManager.peers}, f, indent=4)
+        with open(NodesManager.active_peer_registry, 'w') as f:
+            json.dump({'peers': NodesManager.active_peers}, f, indent=2)
 
     @staticmethod
     async def request(client: httpx.AsyncClient, url: str, method: str = 'GET', signed: bool = False, node_id: Optional[str] = None, **kwargs):
@@ -181,8 +182,8 @@ class NodesManager:
         if node_id == NodesManager.self_id:
             return False
     
-        is_new = node_id not in NodesManager.peers
-        if is_new and len(NodesManager.peers) >= MAX_PEERS_COUNT:
+        is_new = node_id not in NodesManager.active_peers
+        if is_new and len(NodesManager.active_peers) >= MAX_PEERS_COUNT:
             logger.warning(f"Peer limit reached ({MAX_PEERS_COUNT}), new peer will not be added.")
             return False
     
@@ -204,7 +205,7 @@ class NodesManager:
         if not version == NODE_VERSION:
             return False
         
-        NodesManager.peers[node_id] = {
+        NodesManager.active_peers[node_id] = {
             'pubkey': pubkey,
             'url': url_to_store,
             'last_seen': int(time.time()),
@@ -219,7 +220,7 @@ class NodesManager:
         """
         Updates the 'last_seen' timestamp for an active peer.
         """
-        peer = NodesManager.peers.get(node_id)
+        peer = NodesManager.active_peers.get(node_id)
         if peer:
             peer['last_seen'] = int(time.time())
             NodesManager.sync()
@@ -227,14 +228,14 @@ class NodesManager:
     @staticmethod
     def get_peer(node_id: str) -> dict:
         """Retrieves a peer's data by their NodeID."""
-        return NodesManager.peers.get(node_id)
+        return NodesManager.active_peers.get(node_id)
         
     @staticmethod
     def get_all_peers() -> list[dict]:
         """Returns a list of all peers, with NodeID included in each dict."""
         return [
             {'node_id': node_id, **peer_data}
-            for node_id, peer_data in NodesManager.peers.items()
+            for node_id, peer_data in NodesManager.active_peers.items()
         ]
     
     @staticmethod
@@ -278,8 +279,8 @@ class NodesManager:
     @staticmethod
     def remove_peer(node_id: str):
         """Removes a peer from the list and syncs the changes to the JSON file."""
-        if node_id in NodesManager.peers:
-            del NodesManager.peers[node_id]
+        if node_id in NodesManager.active_peers:
+            del NodesManager.active_peers[node_id]
             NodesManager.sync()
             return True
         return False
@@ -289,7 +290,7 @@ class NodesManager:
         """Finds a peer's node_id by their URL."""
         if not url:
             return None
-        for node_id, peer_data in NodesManager.peers.items():
+        for node_id, peer_data in NodesManager.active_peers.items():
             if peer_data.get('url') == url:
                 return node_id
         return None

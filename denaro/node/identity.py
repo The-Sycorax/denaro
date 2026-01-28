@@ -4,13 +4,12 @@ import os
 import hashlib
 import json # Import json for canonical serialization
 from fastecdsa import keys, ecdsa
-from denaro.constants import CURVE
+from denaro.constants import CURVE, KEY_FILE_PATH
 from ..logger import get_logger
 
 logger = get_logger(__name__)
 
 # Define the path for the node's private key file
-KEY_FILE_PATH = os.path.join(os.path.dirname(__file__), 'node_key.priv')
 
 # --- Private variables to hold the loaded key and derived IDs ---
 _private_key: int = None

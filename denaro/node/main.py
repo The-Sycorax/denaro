@@ -56,7 +56,7 @@ from denaro.constants import (
     POSTGRES_PASSWORD, DENARO_DATABASE_NAME, DENARO_DATABASE_HOST,
     MAX_TX_DATA_SIZE, DENARO_NODE_HOST, DENARO_NODE_PORT, MAX_REORG_DEPTH,
     LOG_INCLUDE_REQUEST_CONTENT, LOG_INCLUDE_RESPONSE_CONTENT, LOG_INCLUDE_BLOCK_SYNC_MESSAGES,
-    LOG_MAX_PATH_LENGTH
+    LOG_MAX_PATH_LENGTH, DENARO_DATA_DIR
 )
 from denaro.node.identity import (
     initialize_identity, get_node_id, get_public_key_hex, 
@@ -1207,7 +1207,7 @@ async def get_verified_sender(request: Request):
         return peer_id
 
     # 4. If it's a REGULAR peer request, proceed with the normal logic.
-    peer_count = len(NodesManager.peers) if hasattr(NodesManager, 'peers') else 0
+    peer_count = len(NodesManager.active_peers) if hasattr(NodesManager, 'peers') else 0
     if peer_count >= MAX_PEERS:
         NodesManager.update_peer_last_seen(peer_id)
         return peer_id
@@ -1286,9 +1286,9 @@ async def do_handshake_with_peer(peer_url_to_connect: str):
         # This makes them "known" before we attempt any sync logic.
         url_to_store = peer_advertised_url if peer_is_public and peer_advertised_url else peer_url_to_connect
         if NodesManager.add_or_update_peer(peer_id, peer_pubkey, url_to_store, peer_is_public, version=peer_version):
-            logger.info(f"Handshake Phase 1: Discovered and added new {'public' if peer_is_public else 'private'} peer {peer_id}")
+            logger.info(f"Discovered and added new {'public' if peer_is_public else 'private'} peer {peer_id}")
         else:
-            logger.debug(f"Handshake Phase 1: Discovered and updated {'public' if peer_is_public else 'private'} peer {peer_id}")
+            logger.debug(f"Discovered and updated {'public' if peer_is_public else 'private'} peer {peer_id}")
         
 
         # 2. Respond to Challenge
@@ -1334,8 +1334,8 @@ async def do_handshake_with_peer(peer_url_to_connect: str):
         peers_resp = await interface.get_peers()
         if peers_resp and peers_resp.get('ok'):
             for discovered_peer in peers_resp['result']['peers']:
-                if discovered_peer.get('url') and discovered_peer['node_id'] not in NodesManager.peers and discovered_peer['node_id'] != self_node_id:
-                    if len(NodesManager.peers) < MAX_PEERS:
+                if discovered_peer.get('url') and discovered_peer['node_id'] not in NodesManager.active_peers and discovered_peer['node_id'] != self_node_id:
+                    if len(NodesManager.active_peers) < MAX_PEERS:
                         logger.info(f"Found node {discovered_peer['node_id']} via exchange. Attempting handshake.")
                         asyncio.create_task(do_handshake_with_peer(discovered_peer['url']))
     
@@ -1368,13 +1368,13 @@ async def periodic_peer_discovery():
         await asyncio.sleep(60)
         logger.debug("Running periodic peer discovery...")
         
-        if not NodesManager.peers:
+        if not NodesManager.active_peers:
             logger.info("Peer list is empty. Retrying handshake with bootstrap node.")
             await do_handshake_with_peer(DENARO_BOOTSTRAP_NODE)
             continue
 
         connectable_peers_tuples = [
-            (node_id, peer_data) for node_id, peer_data in NodesManager.peers.items() if peer_data.get('url')
+            (node_id, peer_data) for node_id, peer_data in NodesManager.active_peers.items() if peer_data.get('url')
         ]
 
         if not connectable_peers_tuples:
@@ -1401,8 +1401,8 @@ async def periodic_peer_discovery():
             discovered_peers = peers_resp['result']['peers']
             logger.debug(f"Discovered {len(discovered_peers)} peers from {peer_id}.")
             for discovered_peer in discovered_peers:
-                if discovered_peer['node_id'] not in NodesManager.peers and discovered_peer['node_id'] != self_node_id:
-                    if len(NodesManager.peers) < MAX_PEERS and discovered_peer.get('url'):
+                if discovered_peer['node_id'] not in NodesManager.active_peers and discovered_peer['node_id'] != self_node_id:
+                    if len(NodesManager.active_peers) < MAX_PEERS and discovered_peer.get('url'):
                         logger.info(f"Found new peer {discovered_peer['node_id']} via exchange. Attempting handshake.")
                         asyncio.create_task(do_handshake_with_peer(discovered_peer['url']))
         
@@ -1790,6 +1790,9 @@ async def startup():
     
     logger.info("Starting Denaro Node Server...")
 
+    os.makedirs(DENARO_DATA_DIR, exist_ok=True)
+
+
     # Initialize the shared HTTP client for the application's lifespan
     http_client = httpx.AsyncClient(timeout=CONNECTION_TIMEOUT)
     logger.info("Shared HTTP client initialized.")
@@ -1797,7 +1800,7 @@ async def startup():
     # Initialize security components
     await security.startup()
     
-    NodesManager.purge_peers()
+    #NodesManager.purge_active_peers()
     initialize_identity()
     self_node_id = get_node_id()
     NodesManager.init(self_node_id)
@@ -3109,7 +3112,7 @@ async def get_peers(
               connectable_peers, and recent_peers.<br>
     """
     peers_list = []
-    for peer_id, peer_data in NodesManager.peers.items():
+    for peer_id, peer_data in NodesManager.active_peers.items():
 
         # Filter by public/private based on query parameters
         # If only public is specified, only return public peers

@@ -10,6 +10,7 @@ import re
 from decimal import Decimal
 from dotenv import dotenv_values
 from fastecdsa import curve
+from pathlib import Path
 
 # =============================================================================
 # ENVIRONMENT CONFIGURATION
@@ -42,6 +43,10 @@ LOG_MAX_FILE_SIZE = 10 * 1024 * 1024 # 10MB
 LOG_MAX_PATH_LENGTH = 320  # Maximum URL path length to log (truncates longer paths)
 LOG_BACKUP_COUNT = 5
 
+DENARO_ROOT_DIR: Path = Path(__file__).resolve().parent.parent
+DENARO_DATA_DIR: Path = DENARO_ROOT_DIR / "data"
+KEY_FILE_PATH: Path = DENARO_DATA_DIR / "node_key.priv"
+ACTIVE_PEER_REGISTRY: Path = DENARO_DATA_DIR / "active_peers.json"
 
 # WARNING: SOME OF THE VALUES BELOW ARE NOT MEANT TO BE CHANGED! ONLY CHANGE THESE VALUES IF YOU KNOW
 # WHAT YOU ARE DOING, CREATING A NEW BLOCKCHAIN, OR FOR TESTING PURPOSES. DOING SO WHILE CONNECTED TO
@@ -94,7 +99,7 @@ MAX_BLOCK_CONTENT_SIZE = 4_194_304  # 4MB in HEX format
 
 # Peer management
 MAX_PEERS = 64  # Maximum number of peers to maintain active connections with
-MAX_PEERS_COUNT = 256  # Maximum number of peers to store in the peers database
+MAX_PEERS_COUNT = 256  # Maximum number of peers to store in the peer registry
 
 # Sync operations
 MAX_CONCURRENT_SYNCS = 1  # Maximum concurrent sync operations
