@@ -981,12 +981,32 @@ async def propagate(path: str, data: dict, ignore_node_id: str = None, db: Datab
         else:
             all_peers = non_banned_peers
         
-        tasks = []
+        propagation_path = set(data.get('propagation_path', []))
+        our_node_id = get_node_id()
+        propagation_path.add(our_node_id)
+        peers_to_send = []
 
         for peer in all_peers:
-            if peer['node_id'] == ignore_node_id:
+            peer_id = peer['node_id']
+
+            if peer_id == ignore_node_id:
                 continue
-            
+
+            if peer_id in propagation_path:
+                logger.debug(f"Skipping propagation to {peer_id}: already in propagation_path")
+                continue
+
+            peers_to_send.append(peer)
+
+        for peer in peers_to_send:
+            propagation_path.add(peer['node_id'])
+
+        data_to_send = data.copy()
+        data_to_send['propagation_path'] = list(propagation_path)
+
+        tasks = []
+
+        for peer in peers_to_send:            
             async def communication_task(peer_info: dict, p: str, d: dict):
                 peer_id = peer_info.get('node_id', 'Unknown')
                 peer_url = peer_info.get('url')
@@ -1029,7 +1049,7 @@ async def propagate(path: str, data: dict, ignore_node_id: str = None, db: Datab
                     )
                     logger.warning(f'propagate EXCEPTION from {peer_id}: {e}')
 
-            tasks.append(communication_task(peer, path, data))
+            tasks.append(communication_task(peer, path, data_to_send))
 
         await gather(*tasks)
 
@@ -2077,7 +2097,10 @@ async def submit_block(
         logger.info(f"Accepted block {block_no} from miner at {miner_ip}. Propagating to network...")
         
         # Propagate to all peers
-        background_tasks.add_task(propagate, 'push_block', body, ignore_node_id=None, db=db) 
+        body_to_propagate = body.copy()
+        body_to_propagate['propagation_path'] = [get_node_id()]
+        background_tasks.add_task(propagate, 'push_block', body_to_propagate, ignore_node_id=None, db=db) 
+        
         return {'ok': True, 'result': f'Block {block_no} accepted.'}
 
 
@@ -2271,10 +2294,13 @@ async def push_block(
         await security.reputation_manager.record_good_behavior(verified_sender, points=5)
         
         logger.info(f"Accepted block {block_no} from {verified_sender}. Propagating to network...")
-        background_tasks.add_task(
-            propagate, 'push_block', body, 
-            ignore_node_id=verified_sender, db=db
-        )
+
+        propagation_path = set(body.get('propagation_path', []))
+        propagation_path.add(verified_sender)
+        body_to_propagate = body.copy()
+        body_to_propagate['propagation_path'] = list(propagation_path)
+        background_tasks.add_task(propagate, 'push_block', body_to_propagate, ignore_node_id=verified_sender, db=db)
+
         return {'ok': True, 'result': f'Block {block_no} accepted.'}
         
 
