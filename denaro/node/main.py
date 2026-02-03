@@ -1415,7 +1415,7 @@ async def periodic_peer_discovery():
             
             if not (peers_resp and peers_resp.get('ok')):
                 # Peer responded but with an error. This is a minor protocol violation.
-                await security.reputation_manager.record_violation(peer_id, 'get_peers_failed', 1)
+            #    await security.reputation_manager.record_violation(peer_id, 'get_peers_failed', 1)
                 continue
             
             discovered_peers = peers_resp['result']['peers']
