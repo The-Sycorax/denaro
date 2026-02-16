@@ -74,6 +74,10 @@ mkdir -p "$REGISTRY_DIR"                                      # Ensure registry 
 SANITIZED_NODE_NAME=$(echo "${NODE_NAME}" | tr '-' '_')       # Replace hyphens with underscores for DB naming
 DB_NAME="denaro_${SANITIZED_NODE_NAME}"                       # Per-node database name
 
+if [ -n "${DENARO_DATABASE_NAME}" ]; then
+  DB_NAME="${DENARO_DATABASE_NAME}"
+fi
+
 # Default to internal URL if unset
 if [ -z "${DENARO_SELF_URL}" ]; then
   export DENARO_SELF_URL="http://${NODE_NAME}:${DENARO_NODE_PORT}"
@@ -212,6 +216,9 @@ DENARO_BOOTSTRAP_NODE=${DENARO_BOOTSTRAP_NODE}
 
 DENARO_DATABASE_NAME=${DB_NAME}
 DENARO_DATABASE_HOST=${DENARO_DATABASE_HOST}
+DENARO_DATABASE_USER=${POSTGRES_USER}
+DENARO_DATABASE_PASSWORD=${POSTGRES_PASSWORD}
+
 POSTGRES_USER=${POSTGRES_USER}
 POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
 
@@ -233,18 +240,18 @@ echo "Setting up database: ${DB_NAME}"
 export PGPASSWORD="${POSTGRES_PASSWORD}"
 
 # Wait until Postgres reports readiness
-until pg_isready -h postgres -U "${POSTGRES_USER}" > /dev/null 2>&1; do
+until pg_isready -h "${DENARO_DATABASE_HOST}" -U "${POSTGRES_USER}" > /dev/null 2>&1; do
   echo "Postgres is unavailable - sleeping"
   sleep 1
 done
 echo "PostgreSQL is ready."
 
 # Create database if missing and import schema only on first creation
-if ! psql -h postgres -U "${POSTGRES_USER}" -d "postgres" -tc "SELECT 1 FROM pg_database WHERE datname = '${DB_NAME}'" | grep -q 1; then
+if ! psql -h "${DENARO_DATABASE_HOST}" -U "${POSTGRES_USER}" -d "postgres" -tc "SELECT 1 FROM pg_database WHERE datname = '${DB_NAME}'" | grep -q 1; then
   echo "Database '${DB_NAME}' does not exist. Creating..."
-  psql -h postgres -U "${POSTGRES_USER}" -d "postgres" -c "CREATE DATABASE \"${DB_NAME}\""
+  psql -h "${DENARO_DATABASE_HOST}" -U "${POSTGRES_USER}" -d "postgres" -c "CREATE DATABASE \"${DB_NAME}\""
   echo "Importing database schema from schema.sql..."
-  psql -h postgres -U "${POSTGRES_USER}" -d "${DB_NAME}" < denaro/schema.sql
+  psql -h "${DENARO_DATABASE_HOST}" -U "${POSTGRES_USER}" -d "${DB_NAME}" < denaro/schema.sql
 else
   echo "Database '${DB_NAME}' already exists."
 fi
