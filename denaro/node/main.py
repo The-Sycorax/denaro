@@ -493,8 +493,7 @@ class PeerReputationManager:
         self.ban_threshold = ban_threshold
         self.violation_ttl = violation_ttl
         
-    async def record_violation(self, peer_id: str, violation_type: str, 
-                             severity: int = 5, details: str = None):
+    async def record_violation(self, peer_id: str, violation_type: str, severity: int = 5, details: str = None):
         """Record a violation and update peer score"""
         async with self._lock:
             violation = PeerViolation(
@@ -509,8 +508,11 @@ class PeerReputationManager:
             # Update score
             score_penalty = severity * 10
             self._peer_scores[peer_id] -= score_penalty
+
+            # Clamp score to ban_threshold to prevent unbounded negative scores
+            self._peer_scores[peer_id] = max(self._peer_scores[peer_id], self.ban_threshold)
             
-            # Check if should ban
+            # Check if peer should be banned
             if self._peer_scores[peer_id] <= self.ban_threshold:
                 self._banned_peers.add(peer_id)
                 
@@ -544,6 +546,15 @@ class PeerReputationManager:
                     del self._violations[peer_id]
                     if peer_id in self._peer_scores and self._peer_scores[peer_id] >= 0:
                         del self._peer_scores[peer_id]
+                
+                # Recalculate score from remaining violations and unban
+                elif violations:
+                    recalculated = -sum(v.severity * 10 for v in violations)
+                    recalculated = max(recalculated, self.ban_threshold)
+                    self._peer_scores[peer_id] = recalculated
+                    if peer_id in self._banned_peers and recalculated > self.ban_threshold:
+                        self._banned_peers.discard(peer_id)
+                        logger.info(f"Peer {peer_id} unbanned after violations expired (score: {recalculated})")
 
 
 class QueryCostCalculator:
@@ -1043,10 +1054,7 @@ async def propagate(path: str, data: dict, ignore_node_id: str = None, db: Datab
                     await handle_unreachable_peer(peer_id, peer_url, "propagation")
 
                 except Exception as e:
-                    # Track failed propagation
-                    await security.reputation_manager.record_violation(
-                        peer_id, 'propagation_failure', severity=1, details=str(e)
-                    )
+                    # Network-related failures are not protocol violations — just log them
                     logger.warning(f'propagate EXCEPTION from {peer_id}: {e}')
 
             tasks.append(communication_task(peer, path, data_to_send))
@@ -1110,10 +1118,8 @@ async def _push_sync_to_peer(peer_info: dict, start_block: int, db_conn: Databas
                 if 'Block sequence out of order' in error_msg or 'sequence desynchronized' in error_msg:
                     logger.info(f"[PUSH-SYNC] to {peer_id} ceded. Peer's state changed, another node is likely already syncing them.")
                 else:
+                    # Sync rejections can occur from legitimate state changes — not a protocol violation
                     logger.warning(f"[PUSH-SYNC] to {peer_id} failed. Peer responded with an unexpected error: {response}")
-                    await security.reputation_manager.record_violation(
-                        peer_id, 'sync_rejection', severity=3
-                    )
                 return
 
             batch_len = len(payload_batch)
@@ -1177,10 +1183,8 @@ async def check_peer_and_sync(peer_info: dict):
         remote_status_resp = await interface.get_status()
         
         if not (remote_status_resp and remote_status_resp.get('ok')):
-            logger.warning(f"Could not get status from peer {peer_id} during check.")
-            await security.reputation_manager.record_violation(
-                peer_id, 'status_unavailable', severity=1
-            )
+            # Status unavailability is a network issue, not a protocol violation
+            logger.debug(f"Could not get status from peer {peer_id} during check.")
             return
 
         remote_height = remote_status_resp['result']['height']
@@ -1414,8 +1418,6 @@ async def periodic_peer_discovery():
             peers_resp = await interface.get_peers()
             
             if not (peers_resp and peers_resp.get('ok')):
-                # Peer responded but with an error. This is a minor protocol violation.
-                await security.reputation_manager.record_violation(peer_id, 'get_peers_failed', 1)
                 continue
             
             discovered_peers = peers_resp['result']['peers']
