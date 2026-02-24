@@ -20,7 +20,7 @@ CREATE TABLE IF NOT EXISTS blocks (
     random BIGINT NOT NULL,
     difficulty NUMERIC(3, 1) NOT NULL,
     reward NUMERIC(14, 6) NOT NULL,
-    timestamp TIMESTAMP(0)
+    timestamp BIGINT,
 );
 
 CREATE TABLE IF NOT EXISTS transactions (
@@ -31,7 +31,7 @@ CREATE TABLE IF NOT EXISTS transactions (
     outputs_addresses TEXT[],
     outputs_amounts BIGINT[],
     fees NUMERIC(14, 6) NOT NULL,
-    time_received TIMESTAMP(0)
+    time_received BIGINT
 );
 
 CREATE TABLE IF NOT EXISTS unspent_outputs (
@@ -45,8 +45,8 @@ CREATE TABLE IF NOT EXISTS pending_transactions (
     tx_hex TEXT,
     inputs_addresses TEXT[],
     fees NUMERIC(14, 6) NOT NULL,
-    propagation_time TIMESTAMP(0) NOT NULL DEFAULT NOW(),
-    time_received TIMESTAMP(0)
+    propagation_time BIGINT NOT NULL DEFAULT 0,
+    time_received BIGINT
 );
 
 CREATE TABLE IF NOT EXISTS pending_spent_outputs (

@@ -72,7 +72,45 @@ class Database:
                 try:
                     await connection.fetchrow('SELECT propagation_time FROM pending_transactions LIMIT 1')
                 except UndefinedColumnError:
-                    await connection.execute('ALTER TABLE pending_transactions ADD COLUMN propagation_time TIMESTAMP(0) NOT NULL DEFAULT NOW()')
+                    await connection.execute('ALTER TABLE pending_transactions ADD COLUMN propagation_time BIGINT NOT NULL DEFAULT 0')
+                
+                                # ---------------------------------------------------------------
+                # Migration: Convert all TIMESTAMP columns to BIGINT (unix UTC)
+                # ---------------------------------------------------------------
+                col_type = await connection.fetchval(
+                    "SELECT data_type FROM information_schema.columns "
+                    "WHERE table_name = 'blocks' AND column_name = 'timestamp'"
+                )
+                if col_type is not None and col_type.startswith('timestamp'):
+                    logger.info('Migrating TIMESTAMP columns to BIGINT (unix UTC)...')
+                    await connection.execute("""
+                        -- Drop existing TIMESTAMP defaults before type conversion
+                        ALTER TABLE pending_transactions
+                            ALTER COLUMN propagation_time DROP DEFAULT;
+
+                        -- Convert TIMESTAMP columns to BIGINT using UTC epoch
+                        ALTER TABLE blocks
+                            ALTER COLUMN timestamp TYPE BIGINT
+                            USING EXTRACT(EPOCH FROM timestamp AT TIME ZONE 'UTC')::BIGINT;
+
+                        ALTER TABLE transactions
+                            ALTER COLUMN time_received TYPE BIGINT
+                            USING EXTRACT(EPOCH FROM time_received AT TIME ZONE 'UTC')::BIGINT;
+
+                        ALTER TABLE pending_transactions
+                            ALTER COLUMN propagation_time TYPE BIGINT
+                            USING EXTRACT(EPOCH FROM propagation_time AT TIME ZONE 'UTC')::BIGINT;
+
+                        ALTER TABLE pending_transactions
+                            ALTER COLUMN time_received TYPE BIGINT
+                            USING EXTRACT(EPOCH FROM time_received AT TIME ZONE 'UTC')::BIGINT;
+
+                        -- Set new BIGINT defaults
+                        ALTER TABLE pending_transactions
+                            ALTER COLUMN propagation_time SET DEFAULT 0;
+                    """)
+                    logger.info('TIMESTAMP → BIGINT migration complete.')
+
 
         Database.instance = self
         return self
@@ -92,16 +130,16 @@ class Database:
         async with self.pool.acquire() as connection:
             execution_timstamp_in_pending_txs = await connection.fetch("SELECT column_name FROM information_schema.columns WHERE table_name='pending_transactions' AND column_name='time_received';")            
             if not execution_timstamp_in_pending_txs:
-                # If timstamp column doesn't exist, add it
-                await connection.execute("ALTER TABLE pending_transactions ADD COLUMN time_received TIMESTAMP;")
-            utc_datetime = datetime.now(timezone.utc).replace(tzinfo=None)
+                # If timestamp column doesn't exist, add it
+                await connection.execute("ALTER TABLE pending_transactions ADD COLUMN time_received BIGINT;")
+            utc_now = int(datetime.now(timezone.utc).timestamp())
             await connection.execute(
                 'INSERT INTO pending_transactions (tx_hash, tx_hex, inputs_addresses, fees, time_received) VALUES ($1, $2, $3, $4, $5)',
                 sha256(tx_hex),
                 tx_hex,
                 [point_to_string(await tx_input.get_public_key()) for tx_input in transaction.inputs],
                 transaction.fees,
-                utc_datetime
+                utc_now
             )
         await self.add_transactions_pending_spent_outputs([transaction])
         return True
@@ -170,7 +208,7 @@ class Database:
 
     async def get_need_propagate_transactions(self, last_propagation_delta: int = 600, limit: int = MAX_BLOCK_SIZE_HEX) -> List[Union[Transaction, str]]:
         async with self.pool.acquire() as connection:
-            txs = await connection.fetch(f"SELECT tx_hex, NOW() - propagation_time as delta FROM pending_transactions ORDER BY fees / LENGTH(tx_hex) DESC, LENGTH(tx_hex), tx_hex")
+            txs = await connection.fetch(f"SELECT tx_hex, EXTRACT(EPOCH FROM NOW() AT TIME ZONE 'UTC')::BIGINT - propagation_time as delta FROM pending_transactions ORDER BY fees / LENGTH(tx_hex) DESC, LENGTH(tx_hex), tx_hex")
         return_txs = []
         size = 0
         for tx in txs:
@@ -178,13 +216,13 @@ class Database:
             if size + len(tx_hex) > limit:
                 break
             size += len(tx_hex)
-            if tx['delta'].total_seconds() > last_propagation_delta:
+            if tx['delta'] > last_propagation_delta:
                 return_txs.append(tx_hex)
         return return_txs
 
     async def update_pending_transactions_propagation_time(self, txs_hash: List[str]):
         async with self.pool.acquire() as connection:
-            await connection.execute("UPDATE pending_transactions SET propagation_time = NOW() WHERE tx_hash = ANY($1)", txs_hash)
+            await connection.execute("UPDATE pending_transactions SET propagation_time = EXTRACT(EPOCH FROM NOW() AT TIME ZONE 'UTC')::BIGINT WHERE tx_hash = ANY($1)", txs_hash)
 
     async def get_next_block_average_fee(self):
         limit = MAX_BLOCK_SIZE_HEX
@@ -215,12 +253,12 @@ class Database:
         async with self.pool.acquire() as connection:
             execution_timstamp_in_pending_txs = await connection.fetch("SELECT column_name FROM information_schema.columns WHERE table_name='pending_transactions' AND column_name='time_received';")            
             if not execution_timstamp_in_pending_txs:
-                # If timstamp column doesn't exist in pending_transactions, add it
-                await connection.execute("ALTER TABLE pending_transactions ADD COLUMN time_received TIMESTAMP;")
+                # If timestamp column doesn't exist in pending_transactions, add it
+                await connection.execute("ALTER TABLE pending_transactions ADD COLUMN time_received BIGINT;")
             execution_timstamp_in_txs = await connection.fetch("SELECT column_name FROM information_schema.columns WHERE table_name='transactions' AND column_name='time_received';")            
             if not execution_timstamp_in_txs:
-                # If timstamp column doesn't exist in transactions, add it
-                await connection.execute("ALTER TABLE transactions ADD COLUMN time_received TIMESTAMP;")
+                # If timestamp column doesn't exist in transactions, add it
+                await connection.execute("ALTER TABLE transactions ADD COLUMN time_received BIGINT;")
             data = []
             for transaction in transactions:
                 if isinstance(transaction, CoinbaseTransaction):
@@ -245,7 +283,7 @@ class Database:
             stmt = await connection.prepare('INSERT INTO transactions (block_hash, tx_hash, tx_hex, inputs_addresses, outputs_addresses, outputs_amounts, fees, time_received) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)')
             await stmt.executemany(data)
 
-    async def add_block(self, id: int, block_hash: str, block_content: str, address: str, random: int, difficulty: Decimal, reward: Decimal, timestamp: Union[datetime, int]):
+    async def add_block(self, id: int, block_hash: str, block_content: str, address: str, random: int, difficulty: Decimal, reward: Decimal, timestamp: int):
         async with self.pool.acquire() as connection:
             stmt = await connection.prepare('INSERT INTO blocks (id, hash, content, address, random, difficulty, reward, timestamp) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)')
             await stmt.fetchval(
@@ -256,7 +294,7 @@ class Database:
                 random,
                 difficulty,
                 reward,
-                timestamp if isinstance(timestamp, datetime) else datetime.utcfromtimestamp(timestamp)
+                timestamp
             )
         from .manager import Manager
         Manager.difficulty = None
@@ -557,12 +595,12 @@ class Database:
         async with self.pool.acquire() as connection:
             execution_timstamp_in_pending_txs = await connection.fetch("SELECT column_name FROM information_schema.columns WHERE table_name='pending_transactions' AND column_name='time_received';")            
             if not execution_timstamp_in_pending_txs:
-                # If timstamp column doesn't exist in pending_transactions, add it
-                await connection.execute("ALTER TABLE pending_transactions ADD COLUMN time_received TIMESTAMP;")
+                # If timestamp column doesn't exist in pending_transactions, add it
+                await connection.execute("ALTER TABLE pending_transactions ADD COLUMN time_received BIGINT;")
             execution_timstamp_in_txs = await connection.fetch("SELECT column_name FROM information_schema.columns WHERE table_name='transactions' AND column_name='time_received';")            
             if not execution_timstamp_in_txs:
-                # If timstamp column doesn't exist in transactions, add it
-                await connection.execute("ALTER TABLE transactions ADD COLUMN time_received TIMESTAMP;")
+                # If timestamp column doesn't exist in transactions, add it
+                await connection.execute("ALTER TABLE transactions ADD COLUMN time_received BIGINT;")
 
             get_pending = False
             res = await connection.fetchrow('SELECT tx_hex, tx_hash, block_hash, inputs_addresses, time_received FROM transactions WHERE tx_hash = $1', tx_hash)
@@ -570,10 +608,7 @@ class Database:
                 get_pending = True
                 res = await connection.fetchrow('SELECT tx_hex, tx_hash, inputs_addresses, time_received FROM pending_transactions WHERE tx_hash = $1', tx_hash)
             
-            if res['time_received'] is not None and isinstance(res['time_received'], datetime):
-                time_received = int(round(res['time_received'].replace(tzinfo=timezone.utc).timestamp()))
-            else:
-                time_received = None
+            time_received = int(res['time_received']) if res['time_received'] is not None else None
 
             if res is None:
                 return None
@@ -582,14 +617,11 @@ class Database:
             if not get_pending:
                 block_timestamp = await connection.fetchval("SELECT timestamp FROM blocks WHERE hash = $1;", res.get('block_hash'))
 
-            if block_timestamp is not None and isinstance(block_timestamp, datetime):
-                time_confirmed = int(round(block_timestamp.replace(tzinfo=timezone.utc).timestamp()))
-            else:
-                time_confirmed = None
+            time_confirmed = int(block_timestamp) if block_timestamp is not None else None
 
         tx = await Transaction.from_hex(res['tx_hex'], False)
         if isinstance(tx, CoinbaseTransaction):
-            transaction = {'is_coinbase': True, 'hash': res['tx_hash'], 'block_hash': res.get('block_hash'), 'time_mined': time_received,}
+            transaction = {'is_coinbase': True, 'hash': res['tx_hash'], 'block_hash': res.get('block_hash'), 'time_received': time_received,}
         else:
             delta = None
             if address is not None:

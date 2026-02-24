@@ -49,7 +49,7 @@ def byte_length(i: int):
 def normalize_block(block) -> dict:
     block = dict(block)
     block['address'] = block['address'].strip(' ')
-    block['timestamp'] = int(block['timestamp'].replace(tzinfo=timezone.utc).timestamp())
+    block['timestamp'] = int(block['timestamp'])
     return block
 
 

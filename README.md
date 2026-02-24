@@ -42,7 +42,7 @@
 
 ---
 
-<img src="https://node.denaro.network/height.png?t=2" alt="Denaro's Current Block Height" width="150">
+<img src="https://node.denaro.network/height.png?t=3" alt="Denaro's Current Block Height" width="150">
 
 ### Denaro Projects:
 * **[The-Sycorax](https://github.com/The-Sycorax) / [Denaro Wallet Client GUI](https://github.com/The-Sycorax/DenaroWalletClient-GUI)**
