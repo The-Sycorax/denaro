@@ -4,7 +4,7 @@
 
 **Commit**: [fa34e7bf5e27d8220c4100e399c60fbc47b9b4ce](https://github.com/The-Sycorax/denaro/commit/fa34e7bf5e27d8220c4100e399c60fbc47b9b4ce)
 
-**Date**: 2025-10-14
+**Date**: October 14th, 2025
 
 ---
 
