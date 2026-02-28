@@ -59,8 +59,7 @@
 * **[Avecci-Claussen](https://github.com/Avecci-Claussen) / [Denaro-Vanity-Gen](https://github.com/Avecci-Claussen/Denaro-Vanity-Gen)**
 
 ### Links:
-* **Current Website (Stale): [https://denaro.is](https://denaro.is/)**
-* **New Unofficial Website: [https://denaro.mine.bz](https://denaro.mine.bz/)**
+* **New Website: [https://denaro.mine.bz](https://denaro.mine.bz/)**
 * **Denaro Node: [https://node.denaro.network](https://node.denaro.network/)**
 * **Block Explorer: [https://denaro-explorer.aldgram-solutions.fr](https://denaro-explorer.aldgram-solutions.fr/)**
 * **Discord Server: [https://discord.gg/4Sq2dK4KMv](https://discord.gg/4Sq2dK4KMv)**
