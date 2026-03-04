@@ -1,261 +1,658 @@
 #!/bin/bash
 
-###############################################################################
-# Denaro Node Container Entrypoint
-#
-# Overview
-#   This script launches a Denaro node inside a container. It prepares runtime
-#   configuration, optionally acquires a public URL via Pinggy, coordinates
-#   bootstrap peer discovery through a registry file, ensures the node-specific
-#   PostgreSQL database exists and has the required schema, then starts the
-#   Denaro node process.
-#
-# Lifecycle and responsibilities
-#   1. Initialization:
-#        - The shared peer registry directory is created
-#        - A deterministic database name and internal self URL is derived.
-#        - Bootstrap intent is normalized when unset.
-#
-#   2. Public URL acquisition and publication:
-#        - If tunneling is enabled, a reverse tunnel is extablished via `ssh` 
-#          using Pinggy's free tunnleing service (free.pinggy.io).
-#        - The tunnel output is parsed to capture the public HTTPS URL.
-#        - The captured URL is written to the shared registry file for peer discovery.
-#        - If capture fails, the internal URL is retained and tunneling is disabled.
-#
-#   3. Peer discovery:
-#        - Public bootstrap nodes wait for the appearance of another public peer.
-#        - Private nodes in discovery mode wait for any public node.
-#        - A peer URL that is not the current node is selected when available.
-#        - If a timeout occurs or no peer is available, the bootstrap target is
-#          set to `DENARO_SELF_URL` .
-#
-#   4. Env generation, database provisioning, and application launch:
-#        - An application `.env` file is generated with the required variables.
-#        - PostgreSQL readiness is awaited.
-#        - The node database is created if it does not already exist.
-#        - The schema is imported only on first database creation.
-#        - Finally, the Denaro node is started via `python run_node.py``.
-#
-# Inputs via environment:
-#   NODE_NAME                   Name of this node
-#   DENARO_NODE_HOST            Hostname or IP the node binds to or advertises
-#   DENARO_NODE_PORT            Port that the node listens on inside the container
-#   ENABLE_PINGGY_TUNNEL        When "true", Pinggy tunneling is enabled to expose
-#                               the node on the Internet.
-#   DENARO_BOOTSTRAP_NODE       "self", "discover", or any explicit URL
-#   DENARO_DATABASE_HOST        Hostname of the database service
-#   POSTGRES_USER               Database user
-#   POSTGRES_PASSWORD           Database password
-#
-# Outputs and artifacts:
-#   - A registry file at /shared/registry/public_nodes.txt contains public URLs when available.
-#   - A .env file is written in the working directory for the application runtime.
-#   - A PostgreSQL database named "denaro_<sanitized node name>" is created if absent.
-#
-# Fallback strategy and exit behavior:
-#   - The script is designed to be resilient and avoid exiting on recoverable issues.
-#   - Tunnel failure does not cause exit. The internal URL is used and tunneling is disabled.
-#   - Discovery timeout does not cause exit. The bootstrap target becomes self.
-#   - Absence of a different public URL does not cause exit. The bootstrap target becomes self.
-#   - Database or unrecoverable runtime errors may still cause exit due to `set -e`.
-#
-###############################################################################
+set -euo pipefail
+IFS=$'\n\t'
+umask 077
 
-set -e
-
-echo "--- Denaro Node Container Entrypoint for ${NODE_NAME} ---"
-
-# --- CONFIGURATION ---
-REGISTRY_DIR="/shared/node-registry"                          # Shared registry directory
-REGISTRY_FILE="${REGISTRY_DIR}/public_nodes.txt"              # Shared peer registry file
-mkdir -p "$REGISTRY_DIR"                                      # Ensure registry directory exists
-
-SANITIZED_NODE_NAME=$(echo "${NODE_NAME}" | tr '-' '_')       # Replace hyphens with underscores for DB naming
-DB_NAME="denaro_${SANITIZED_NODE_NAME}"                       # Per-node database name
-
-if [ -n "${DENARO_DATABASE_NAME}" ]; then
-  DB_NAME="${DENARO_DATABASE_NAME}"
-fi
-
-# Default to internal URL if unset
-if [ -z "${DENARO_SELF_URL}" ]; then
-  export DENARO_SELF_URL="http://${NODE_NAME}:${DENARO_NODE_PORT}"
-fi
-
-# Normalize bootstrap intent default if unset
-if [ -z "${DENARO_BOOTSTRAP_NODE}" ]; then
-  export DENARO_BOOTSTRAP_NODE="https://node.denaro.network"
-fi
-
-if [ -z "${LOG_LEVEL}" ]; then
-  export LOG_LEVEL="INFO"
-fi
-
-if [ -z "${LOG_FORMAT}" ]; then
-  export LOG_FORMAT="%(asctime)s - %(levelname)s - %(name)s - %(message)s"
-fi
-
-if [ -z "${LOG_DATE_FORMAT}" ]; then
-  export LOG_DATE_FORMAT="%Y-%m-%dT%H:%M:%S"
-fi
-
-if [ -z "${LOG_INCLUDE_REQUEST_CONTENT}" ]; then
-  export LOG_INCLUDE_REQUEST_CONTENT="False"
-fi
-
-if [ -z "${LOG_INCLUDE_RESPONSE_CONTENT}" ]; then
-  export LOG_INCLUDE_RESPONSE_CONTENT="False"
-fi
-
-if [ -z "${LOG_INCLUDE_BLOCK_SYNC_MESSAGES}" ]; then
-  export LOG_INCLUDE_BLOCK_SYNC_MESSAGES="False"
-fi
-
-if [ -z "${LOG_CONSOLE_HIGHLIGHTING}" ]; then
-  export LOG_CONSOLE_HIGHLIGHTING="True"
-fi
+# Global, set when pinggy tunnel is started
+PINGGY_SSH_PID=""
 
 
-# --- STAGE 1: OPTIONAL PUBLIC TUNNEL VIA PINGGY ---
-# If tunneling is requested, attempt to capture a public URL. Failure falls back to internal URL.
-if [ "${ENABLE_PINGGY_TUNNEL}" = "true" ]; then
-  echo "Pinggy tunnel enabled. Starting tunnel..."
-  # Launch the tunnel in the background. Suppress strict host checks due to ephemeral endpoints.
-  ssh -n -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-      -p 443 -R0:localhost:${DENARO_NODE_PORT} free.pinggy.io > /tmp/pinggy.log 2>&1 &
+log() {
+  # Usage: log LEVEL message...
+  # LEVEL: INFO|WARN|ERROR (any string accepted)
+  local level="${1:-INFO}"
+  shift || true
 
-  echo "Waiting for Pinggy to provide a public URL..."
-  COUNTER=0
-  PUBLIC_ADDRESS=""
+  local timestamp
+  timestamp="$(date -u +'%Y-%m-%dT%H:%M:%S UTC')"
+
+  # WARN/ERROR to stderr, everything else to stdout
+  if [ "${level}" = "WARN" ] || [ "${level}" = "ERROR" ]; then
+    echo "${timestamp} - ${level} - docker-entrypoint.sh - $*" >&2
+  else
+    echo "${timestamp} - ${level} - docker-entrypoint.sh - $*"
+  fi
+}
+
+
+require_env() {
+  local name="$1"
+  if [ -z "${!name:-}" ]; then
+    log ERROR "${name} is not set. Exiting..."
+    exit 1
+  fi
+}
+
+
+require_cmd() {
+  local cmd="$1"
+  if ! command -v "${cmd}" >/dev/null 2>&1; then
+    log ERROR "Required command '${cmd}' not found. Exiting..."
+    exit 1
+  fi
+}
+
+
+cleanup() {
+  if [ -n "${PINGGY_SSH_PID}" ]; then
+    if kill -0 "${PINGGY_SSH_PID}" >/dev/null 2>&1; then
+      log INFO "Stopping Pinggy tunnel (pid ${PINGGY_SSH_PID})"
+      kill "${PINGGY_SSH_PID}" >/dev/null 2>&1 || true
+      wait "${PINGGY_SSH_PID}" >/dev/null 2>&1 || true
+    fi
+  fi
+}
+trap cleanup EXIT
+
+
+# ------------------------------
+# Postgres helpers
+# ------------------------------
+# Run psql as the cluster superuser defined by POSTGRES_USER and POSTGRES_PASSWORD
+psql_super() {
+  PGPASSWORD="${POSTGRES_PASSWORD}" psql \
+    -X \
+    -v ON_ERROR_STOP=1 \
+    -q \
+    -h "${DENARO_DATABASE_HOST}" \
+    -U "${POSTGRES_USER}" \
+    "$@"
+}
+
+
+wait_for_postgres() {
+  export PGPASSWORD="${POSTGRES_PASSWORD}"
+  log INFO "Waiting for Postgres at ${DENARO_DATABASE_HOST}:5432"
+  until pg_isready -h "${DENARO_DATABASE_HOST}" -p 5432 -U "${POSTGRES_USER}" >/dev/null 2>&1
+  do
+    log INFO "Postgres not ready yet"
+    sleep 1
+  done
+  log INFO "Postgres is ready"
+}
+
+
+sanitize_identifier() {
+  # Conservative Postgres identifier: starts with [A-Za-z_], then [A-Za-z0-9_]*
+  local raw="$1"
+  local sanitized
+
+  sanitized="$(echo "${raw}" | tr '-' '_' | tr -cd 'A-Za-z0-9_')"
+  if [[ ! "${sanitized}" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]; then
+    # Ensure it starts with a safe character
+    sanitized="_${sanitized}"
+    sanitized="$(echo "${sanitized}" | tr -cd 'A-Za-z0-9_')"
+  fi
+
+  if [[ ! "${sanitized}" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]; then
+    log ERROR "Unable to derive a safe Postgres identifier from '${raw}'. Got '${sanitized}'. Exiting..."
+    exit 1
+  fi
+
+  echo "${sanitized}"
+}
+
+
+create_node_database() {
+  local db_name="$1"
+
+  export PGPASSWORD="${POSTGRES_PASSWORD}"
+
+  # NOTE: We intentionally avoid psql's quoted-variable forms (:'var', :"var") because
+  # some environments do not expand them, leading to server-side syntax errors.
+  # Since db_name is validated by sanitize_identifier, interpolation here is safe.
+  local exists
+  exists="$(psql_super -d "postgres" -tAc "SELECT 1 FROM pg_database WHERE datname = '${db_name}'")"
+
+  if [ "${exists}" != "1" ]; then
+    log INFO "Database '${db_name}' does not exist. Creating..."
+    psql_super -d "postgres" -c "CREATE DATABASE \"${db_name}\"" >/dev/null
+
+    log INFO "Importing database schema from denaro/schema.sql"
+    psql_super -d "${db_name}" --single-transaction -f "denaro/schema.sql" >/dev/null
+  else
+    log INFO "Database '${db_name}' already exists."
+  fi
+}
+
+
+# ------------------------------
+# Registry helpers
+# ------------------------------
+with_registry_lock() {
+  local lock_path="$1"
+  shift
+
+  if command -v flock >/dev/null 2>&1; then
+    # Use a dedicated fd so nested locks are possible if needed
+    exec 200>"${lock_path}"
+    flock 200
+    "$@"
+    flock -u 200
+    exec 200>&-
+  else
+    log WARN "flock not available. Proceeding without registry lock"
+    "$@"
+  fi
+}
+
+
+registry_line_count() {
+  local file_path="$1"
+  if [ -s "${file_path}" ]; then
+    jq -e 'length' "${file_path}" 2>/dev/null || echo 0
+  else
+    echo 0
+  fi
+}
+
+
+registry_append_unique() {
+  local registry_file="$1"
+  local url="$2"
+  local node_name="$3"
+  local lock_file="${registry_file}.lock"
+
+  with_registry_lock "${lock_file}" _registry_append_unique_locked "${registry_file}" "${url}" "${node_name}"
+}
+
+
+_registry_append_unique_locked() {
+  local registry_file="$1"
+  local url="$2"
+  local node_name="$3"
+
+  if [ ! -s "${registry_file}" ]; then
+    echo "{}" > "${registry_file}"
+  fi
+
+  local current_url=""
+  current_url="$(jq -r --arg node "${node_name}" '.[$node] // empty' "${registry_file}" 2>/dev/null)"
+
+  if [ "${current_url}" = "${url}" ]; then
+    log INFO "Registry already contains URL for ${node_name}, skipping append"
+  else
+    local tmp_file
+    tmp_file="$(mktemp "${registry_file}.tmp.XXXXXX")"
+    if jq --arg node "${node_name}" --arg url "${url}" '.[$node] = $url' "${registry_file}" > "${tmp_file}"; then
+      mv "${tmp_file}" "${registry_file}"
+      log INFO "Published public URL for ${node_name} to registry"
+    else
+      rm -f "${tmp_file}"
+      log ERROR "Failed to update registry JSON for ${node_name}"
+    fi
+  fi
+}
+
+
+registry_pick_other_peer() {
+  local registry_file="$1"
+  local self_url="$2"
+  local lock_file="${registry_file}.lock"
+
+  with_registry_lock "${lock_file}" _registry_pick_other_peer_locked "${registry_file}" "${self_url}"
+}
+
+
+_registry_pick_other_peer_locked() {
+  local registry_file="$1"
+  local self_url="$2"
+
+  if [ -s "${registry_file}" ]; then
+    # Pick the first value that is not self_url
+    jq -r --arg self "${self_url}" 'to_entries | map(select(.value != $self)) | .[0].value // empty' "${registry_file}" 2>/dev/null || true
+  fi
+}
+
+
+# ------------------------------
+# Node: Pinggy + Discovery (refactored)
+# ------------------------------
+setup_pinggy_tunnel() {
+  local registry_file="$1"
+
+  if [ "${ENABLE_PINGGY_TUNNEL:-false}" != "true" ]; then
+    log INFO "Pinggy tunnel not enabled. Using current self URL"
+    return 0
+  fi
+
+  require_cmd ssh
+
+  log INFO "Pinggy tunnel enabled. Starting tunnel"
+  : > /tmp/pinggy.log
+
+  # Background SSH tunnel
+  ssh -n \
+    -o StrictHostKeyChecking=no \
+    -o UserKnownHostsFile=/dev/null \
+    -o ExitOnForwardFailure=yes \
+    -o ServerAliveInterval=30 \
+    -o ServerAliveCountMax=3 \
+    -p 443 \
+    -R0:localhost:"${DENARO_NODE_PORT}" \
+    free.pinggy.io > /tmp/pinggy.log 2>&1 &
+
+  PINGGY_SSH_PID="$!"
+  log INFO "Pinggy ssh pid ${PINGGY_SSH_PID}"
+
+  log INFO "Waiting for Pinggy to provide a public URL"
+  local counter=0
+  local public_address=""
+
   # Up to 30 seconds for capture, scanning the log each second
-  while [ $COUNTER -lt 30 ]; do
-    # Extract the first matching https endpoint from Pinggy output
-    PUBLIC_ADDRESS=$(grep -o 'https://[a-zA-Z0-9-]*\.a\.free\.pinggy\.link' /tmp/pinggy.log | head -n 1 || true)
-    if [ -n "$PUBLIC_ADDRESS" ]; then
-      echo "SUCCESS: Captured public URL: ${PUBLIC_ADDRESS}"
-      export DENARO_SELF_URL="${PUBLIC_ADDRESS}"                 # Promote captured public URL to self URL
-      echo "${PUBLIC_ADDRESS}" >> "${REGISTRY_FILE}"             # Publish to registry for peer discovery
-      echo "Published public URL to registry."
+  while [ "${counter}" -lt 30 ]; do
+    # If tunnel process died, stop waiting early
+    if ! kill -0 "${PINGGY_SSH_PID}" >/dev/null 2>&1; then
+      log WARN "Pinggy ssh process exited before providing a URL"
       break
     fi
+
+    # Match the first https endpoint for pinggy free links
+    public_address="$(grep -Eo 'https://[A-Za-z0-9-]+\.a\.free\.pinggy\.link' /tmp/pinggy.log | head -n 1 || true)"
+    if [ -n "${public_address}" ]; then
+      log INFO "Captured public URL: ${public_address}"
+      export DENARO_SELF_URL="${public_address}"
+      registry_append_unique "${registry_file}" "${public_address}" "${NODE_NAME}"
+      return 0
+    fi
+
     sleep 1
-    COUNTER=$((COUNTER+1))
+    counter=$((counter + 1))
   done
 
-  # Fallback if no public URL could be captured
-  if [ -z "$PUBLIC_ADDRESS" ]; then
-    echo "WARNING: Could not get public URL from Pinggy output. Falling back to internal URL."
-    echo "Disabling tunneling to prevent dependent logic from waiting on a public endpoint."
-    export DENARO_SELF_URL="http://${NODE_NAME}:${DENARO_NODE_PORT}"
-    export ENABLE_PINGGY_TUNNEL="false"
-    # Show last lines of the log for diagnostics without aborting
-    echo "Pinggy log tail for diagnostics:"
-    tail -n 50 /tmp/pinggy.log || true
-  fi
-else
-  echo "Pinggy tunnel not enabled. Using internal URL for self."
-fi
+  log WARN "Could not get public URL from Pinggy output. Falling back to internal URL"
+  export DENARO_SELF_URL="http://${NODE_NAME}:${DENARO_NODE_PORT}"
+  export ENABLE_PINGGY_TUNNEL="false"
 
-# --- STAGE 2 AND 3: BOOTSTRAP DISCOVERY WHEN REQUESTED ---
-# Discovery runs only when DENARO_BOOTSTRAP_NODE equals "discover".
-# If a fixed bootstrap address is provided, this entire block is skipped.
-if [ "${DENARO_BOOTSTRAP_NODE}" = "discover" ]; then
-  # Determine how many URLs to expect in the registry
-  # Public nodes that are discoverable wait for a partner. Private nodes wait for any public node.
-  EXPECTED_URLS=1
-  if [ "${ENABLE_PINGGY_TUNNEL}" = "true" ]; then
-    EXPECTED_URLS=2
-    echo "Discovery requested and tunneling enabled. Waiting for a second public node to register..."
-  else
-    echo "Discovery requested. Waiting for any public node to register..."
+  log WARN "Pinggy log tail for diagnostics"
+  tail -n 80 /tmp/pinggy.log || true
+}
+
+
+discover_bootstrap_node() {
+  local registry_file="$1"
+
+  if [ "${DENARO_BOOTSTRAP_NODE:-}" != "random" ]; then
+    return 0
   fi
 
-  COUNTER=0
-  MAX_WAIT_ITERATIONS=60  # 60 iterations at 2 seconds each is about 120 seconds
-
-  # Wait for the registry file to reach the expected count
-  while [ "$(wc -l < "${REGISTRY_FILE}" 2>/dev/null || echo 0)" -lt "${EXPECTED_URLS}" ] && [ $COUNTER -lt $MAX_WAIT_ITERATIONS ]; do
-    CURRENT=$(wc -l < "${REGISTRY_FILE}" 2>/dev/null || echo 0)
-    echo "Waiting for public nodes... found ${CURRENT}/${EXPECTED_URLS}"
-    sleep 2
-    COUNTER=$((COUNTER+1))
-  done
-
-  # If registry is still short, apply fallback instead of exiting
-  if [ "$(wc -l < "${REGISTRY_FILE}" 2>/dev/null || echo 0)" -lt "${EXPECTED_URLS}" ]; then
-    echo "WARNING: Timed out waiting for enough public nodes to register."
-    # Fallback policy keeps the node operable and able to gossip later
+  local topology_file="/shared/denaro-node-topology/topology.json"
+  if [ ! -s "${topology_file}" ]; then
+    log WARN "Topology file missing, cannot determine public nodes. Falling back to self."
     export DENARO_BOOTSTRAP_NODE="${DENARO_SELF_URL}"
-    echo "Applying fallback for discovery: setting DENARO_BOOTSTRAP_NODE to self."
+    return 0
+  fi
+
+  local total_public
+  total_public="$(jq -r '.public_nodes | length' "${topology_file}" 2>/dev/null || echo 0)"
+
+  if [ "${total_public}" -le 0 ]; then
+    log WARN "No public nodes defined in topology. Falling back to self."
+    export DENARO_BOOTSTRAP_NODE="${DENARO_SELF_URL}"
+    return 0
+  fi
+
+  local expected_others
+  expected_others="$(jq -r --arg self "${NODE_NAME}" '[.public_nodes[] | select(. != $self)] | length' "${topology_file}" 2>/dev/null || echo 0)"
+
+  if [ "${expected_others}" -eq 0 ]; then
+    log WARN "No other public nodes exist in topology. Falling back to self."
+    export DENARO_BOOTSTRAP_NODE="${DENARO_SELF_URL}"
+    return 0
+  fi
+
+  log INFO "Random node requested. Waiting for all other public nodes to register..."
+
+  local counter=0
+  local max_wait_iterations=60
+
+  while [ "${counter}" -lt "${max_wait_iterations}" ]; do
+    local missing_nodes="error"
+    if [ -s "${registry_file}" ]; then
+      missing_nodes="$(jq -r --arg self "${NODE_NAME}" --slurpfile reg "${registry_file}" '.public_nodes | map(select(. != $self)) | map(select(in($reg[0]) | not)) | join(", ")' "${topology_file}" 2>/dev/null || echo "error")"
+    fi
+
+    if [ "${missing_nodes}" = "" ]; then
+      break
+    fi
+
+    log INFO "Waiting 60 seconds... missing public nodes: ${missing_nodes}"
+    sleep 2
+    counter=$((counter + 1))
+  done
+
+  if [ "${counter}" -ge "${max_wait_iterations}" ]; then
+    log WARN "Timed out waiting for all public nodes to register"
+  fi
+
+  local random_address=""
+  if [ -s "${registry_file}" ]; then
+    random_address="$(jq -r --arg self "${NODE_NAME}" --slurpfile top "${topology_file}" '
+      to_entries | map(select(.key != $self and (.key | in($top[0].public_nodes | map({(.): true}) | add)))) | map(.value) | .[]
+    ' "${registry_file}" 2>/dev/null | shuf -n 1 || true)"
+  fi
+
+  if [ -n "${random_address}" ]; then
+    export DENARO_BOOTSTRAP_NODE="${random_address}"
+    log INFO "Selected bootstrap node: ${DENARO_BOOTSTRAP_NODE}"
   else
-    # Registry has enough lines. Pick a peer that is not ourselves
-    OTHER_PUBLIC_ADDRESS=$(grep -v "${DENARO_SELF_URL}" "${REGISTRY_FILE}" | head -n 1 || true)
-    if [ -n "${OTHER_PUBLIC_ADDRESS}" ]; then
-      export DENARO_BOOTSTRAP_NODE="${OTHER_PUBLIC_ADDRESS}"
-      echo "Discovered and selected bootstrap peer: ${DENARO_BOOTSTRAP_NODE}"
+    log WARN "No different bootstrap node found. Falling back to self"
+    export DENARO_BOOTSTRAP_NODE="${DENARO_SELF_URL}"
+  fi
+}
+
+
+resolve_bootstrap_node_from_name() {
+  local registry_file="$1"
+  local topology_file="/shared/denaro-node-topology/topology.json"
+
+  if [ -z "${DENARO_BOOTSTRAP_NODE:-}" ]; then
+    return 0
+  fi
+
+  if [[ "${DENARO_BOOTSTRAP_NODE}" == http* ]] || [ "${DENARO_BOOTSTRAP_NODE}" = "self" ] || [ "${DENARO_BOOTSTRAP_NODE}" = "random" ]; then
+    return 0
+  fi
+
+  if [ ! -s "${topology_file}" ]; then
+    log WARN "Topology file missing. Cannot resolve node name '${DENARO_BOOTSTRAP_NODE}'. Falling back to self."
+    export DENARO_BOOTSTRAP_NODE="${DENARO_SELF_URL}"
+    return 0
+  fi
+
+  local is_valid="false"
+  if jq -e --arg node "${DENARO_BOOTSTRAP_NODE}" '.public_nodes[] | select(. == $node)' "${topology_file}" >/dev/null 2>&1; then
+    is_valid="true"
+  fi
+
+  if [ "${is_valid}" = "true" ]; then
+    log INFO "Bootstrap node '${DENARO_BOOTSTRAP_NODE}' matched a node name in topology. Waiting for its registry URL..."
+    local counter=0
+    local max_wait_iterations=60
+    local discovered_url=""
+
+    while [ "${counter}" -lt "${max_wait_iterations}" ]; do
+      if [ -s "${registry_file}" ]; then
+        discovered_url="$(jq -r --arg node "${DENARO_BOOTSTRAP_NODE}" '.[$node] // empty' "${registry_file}" 2>/dev/null)"
+      fi
+      
+      if [ -n "${discovered_url}" ]; then
+        break
+      fi
+      log INFO "Waiting 60 seconds for node '${DENARO_BOOTSTRAP_NODE}'... (attempt $((counter + 1)))"
+      sleep 2
+      counter=$((counter + 1))
+    done
+
+    if [ -n "${discovered_url}" ]; then
+      log INFO "Resolved bootstrap node '${DENARO_BOOTSTRAP_NODE}' -> '${discovered_url}'"
+      export DENARO_BOOTSTRAP_NODE="${discovered_url}"
     else
-      echo "WARNING: Could not discover a different bootstrap peer URL. Falling back to self."
+      log WARN "Timeout: Node '${DENARO_BOOTSTRAP_NODE}' did not publish its URL to the registry. Falling back to self."
       export DENARO_BOOTSTRAP_NODE="${DENARO_SELF_URL}"
     fi
+  else
+    log WARN "Bootstrap node '${DENARO_BOOTSTRAP_NODE}' is not a public node in topology.json. Falling back to self."
+    export DENARO_BOOTSTRAP_NODE="${DENARO_SELF_URL}"
   fi
-fi
+}
 
-# Final resolution when the literal value is "self"
-if [ "${DENARO_BOOTSTRAP_NODE}" = "self" ]; then
-  export DENARO_BOOTSTRAP_NODE="${DENARO_SELF_URL}"
-fi
 
-# --- STAGE 4: CONFIGURE AND LAUNCH ---
-echo "Configuring .env file for ${NODE_NAME}..."
-cat << EOF > /app/.env
-DENARO_NODE_HOST=${DENARO_NODE_HOST}
-DENARO_NODE_PORT=${DENARO_NODE_PORT}
-DENARO_SELF_URL=${DENARO_SELF_URL}
-DENARO_BOOTSTRAP_NODE=${DENARO_BOOTSTRAP_NODE}
+# ------------------------------
+# dotenv writer (quoted values)
+# ------------------------------
+dotenv_quote() {
+  # Returns a double-quoted, escaped value safe for sourcing and for most .env parsers.
+  # Escapes: \ " $ ` and normalizes CRLF/newlines/tabs.
+  local v="$1"
+  v="${v//$'\r'/}"
+  v="${v//$'\n'/\\n}"
+  v="${v//$'\t'/\\t}"
+  v="${v//\\/\\\\}"
+  v="${v//\"/\\\"}"
+  v="${v//\$/\\\$}"
+  v="${v//\`/\\\`}"
+  printf "\"%s\"" "${v}"
+}
 
-DENARO_DATABASE_NAME=${DB_NAME}
-DENARO_DATABASE_HOST=${DENARO_DATABASE_HOST}
 
-POSTGRES_USER=${POSTGRES_USER}
-POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+dotenv_kv() {
+  # Usage: dotenv_kv KEY VALUE
+  local k="$1"
+  local v="$2"
+  printf '%s=%s\n' "${k}" "$(dotenv_quote "${v}")"
+}
 
-LOG_LEVEL=${LOG_LEVEL}
-LOG_FORMAT=${LOG_FORMAT}
-LOG_DATE_FORMAT=${LOG_DATE_FORMAT}
-LOG_CONSOLE_HIGHLIGHTING=${LOG_CONSOLE_HIGHLIGHTING}
-LOG_INCLUDE_REQUEST_CONTENT=${LOG_INCLUDE_REQUEST_CONTENT}
-LOG_INCLUDE_RESPONSE_CONTENT=${LOG_INCLUDE_RESPONSE_CONTENT}
-LOG_INCLUDE_BLOCK_SYNC_MESSAGES=${LOG_INCLUDE_BLOCK_SYNC_MESSAGES}
+
+print_env_file() {
+  local path="$1"
+
+  echo
+  echo "Generated .env file:"
+  echo "################################################################################"
+
+    # Redact sensitive values.
+    # Keep quoting style consistent with the file.
+    local sed_expr=""
+    sed_expr+='s/^POSTGRES_USER=.*/POSTGRES_USER="***REDACTED***"/;'
+    sed_expr+='s/^POSTGRES_PASSWORD=.*/POSTGRES_PASSWORD="***REDACTED***"/;'
+    sed -E "${sed_expr}" "${path}"
+
+  echo "################################################################################"
+  echo
+}
+
+
+write_env_file() {
+  local path="$1"
+  {
+    dotenv_kv DENARO_NODE_HOST "${DENARO_NODE_HOST}"
+    dotenv_kv DENARO_NODE_PORT "${DENARO_NODE_PORT}"
+    dotenv_kv DENARO_SELF_URL "${DENARO_SELF_URL}"
+    dotenv_kv DENARO_BOOTSTRAP_NODE "${DENARO_BOOTSTRAP_NODE}"
+    echo
+    dotenv_kv DENARO_DATABASE_NAME "${DB_NAME}"
+    dotenv_kv DENARO_DATABASE_HOST "${DENARO_DATABASE_HOST}"
+    dotenv_kv POSTGRES_USER "${POSTGRES_USER}"
+    dotenv_kv POSTGRES_PASSWORD "${POSTGRES_PASSWORD}"
+    echo
+    dotenv_kv LOG_LEVEL "${LOG_LEVEL}"
+    dotenv_kv LOG_FORMAT "${LOG_FORMAT}"
+    dotenv_kv LOG_DATE_FORMAT "${LOG_DATE_FORMAT}"
+    dotenv_kv LOG_CONSOLE_HIGHLIGHTING "${LOG_CONSOLE_HIGHLIGHTING}"
+    dotenv_kv LOG_INCLUDE_REQUEST_CONTENT "${LOG_INCLUDE_REQUEST_CONTENT}"
+    dotenv_kv LOG_INCLUDE_RESPONSE_CONTENT "${LOG_INCLUDE_RESPONSE_CONTENT}"
+    dotenv_kv LOG_INCLUDE_BLOCK_SYNC_MESSAGES "${LOG_INCLUDE_BLOCK_SYNC_MESSAGES}"
+  } > "${path}"
+
+  chmod 600 "${path}" || true
+  print_env_file "${path}"
+}
+
+
+start_denaro_node() {
+  local pid=""
+
+  log INFO "Starting Denaro Node via 'python /app/run_node.py'"; echo
+  python /app/run_node.py &
+  pid="$!"
+
+  forward_term() {
+    if kill -0 "${pid}" >/dev/null 2>&1; then
+      log INFO "Forwarding termination signal to Denaro node (pid ${pid})"
+      kill -TERM "${pid}" >/dev/null 2>&1 || true
+    fi
+  }
+
+  trap forward_term SIGTERM SIGINT
+
+  wait "${pid}"
+}
+
+
+# ------------------------------
+# Node mode
+# ------------------------------
+node_main() {
+  echo
+  echo "################################################################################"
+  echo "--- Denaro Node Entrypoint for ${NODE_NAME:-<unset>} ---"
+  echo "################################################################################"
+  echo
+
+  require_cmd psql
+  require_cmd pg_isready
+
+  require_env POSTGRES_USER
+  require_env POSTGRES_PASSWORD
+  require_env DENARO_DATABASE_HOST
+
+  require_env DENARO_NODE_HOST
+  require_env NODE_NAME
+  require_env DENARO_NODE_PORT
+
+  local registry_dir="/shared/denaro-node-registry"
+  local registry_file="${registry_dir}/public_nodes.json"
+  mkdir -p "${registry_dir}"
+  if [ ! -s "${registry_file}" ]; then
+    echo "{}" > "${registry_file}"
+  fi
+
+  # DB name
+  if [ -n "${DENARO_DATABASE_NAME:-}" ]; then
+    DB_NAME="$(sanitize_identifier "${DENARO_DATABASE_NAME}")"
+  else
+    DB_NAME="$(sanitize_identifier "${NODE_NAME}")"
+  fi
+  export DB_NAME
+
+  # Self URL default
+  if [ -z "${DENARO_SELF_URL:-}" ]; then
+    export DENARO_SELF_URL="self"
+  fi
+
+  # Bootstrap default
+  if [ -z "${DENARO_BOOTSTRAP_NODE:-}" ]; then
+    export DENARO_BOOTSTRAP_NODE="https://node.denaro.network"
+  fi
+
+  # Logging defaults
+  export LOG_LEVEL="${LOG_LEVEL:-INFO}"
+  export LOG_FORMAT="${LOG_FORMAT:-%(asctime)s - %(levelname)s - %(name)s - %(message)s}"
+  export LOG_DATE_FORMAT="${LOG_DATE_FORMAT:-%Y-%m-%dT%H:%M:%S}"
+  export LOG_INCLUDE_REQUEST_CONTENT="${LOG_INCLUDE_REQUEST_CONTENT:-False}"
+  export LOG_INCLUDE_RESPONSE_CONTENT="${LOG_INCLUDE_RESPONSE_CONTENT:-False}"
+  export LOG_INCLUDE_BLOCK_SYNC_MESSAGES="${LOG_INCLUDE_BLOCK_SYNC_MESSAGES:-False}"
+  export LOG_CONSOLE_HIGHLIGHTING="${LOG_CONSOLE_HIGHLIGHTING:-True}"
+
+  # --- Stage 1: Pinggy (optional) ---
+  setup_pinggy_tunnel "${registry_file}"
+
+  resolve_bootstrap_node_from_name "${registry_file}"
+
+  # --- Stage 2/3: Discovery (optional) ---
+  discover_bootstrap_node "${registry_file}"
+
+  # "self" literal resolution
+  if [ "${DENARO_BOOTSTRAP_NODE}" = "self" ]; then
+    export DENARO_BOOTSTRAP_NODE="${DENARO_SELF_URL}"
+  fi
+
+  # --- Stage 4: env + db + launch ---
+  log INFO "Writing /app/.env"
+  write_env_file "/app/.env"
+
+  wait_for_postgres
+
+  log INFO "Setting up database: ${DB_NAME}"
+  create_node_database "${DB_NAME}"
+  log INFO "Database ready"
+
+  unset PGPASSWORD
+
+  log INFO "Entrypoint script finished"
+  start_denaro_node
+}
+
+
+# ------------------------------
+# pgAdmin mode
+# ------------------------------
+pgadmin_main() {
+  if [ "${DOCKER_ENABLE_PGADMIN:-false}" != "true" ]; then
+    log INFO "pgAdmin is disabled by configuration (DOCKER_ENABLE_PGADMIN). Exiting..."
+    exit 0
+  fi
+
+  log INFO "--- pgadmin starting ---"
+
+  require_env DENARO_DATABASE_HOST
+  require_env POSTGRES_USER
+  require_env POSTGRES_PASSWORD
+
+  local pgadmin_config_dir="/var/lib/pgadmin"
+  local pgpass_file="${pgadmin_config_dir}/pgpass"
+
+  log INFO "Writing servers.json to ${pgadmin_config_dir}/servers.json"
+  mkdir -p "${pgadmin_config_dir}"
+
+  cat << EOF > "${pgadmin_config_dir}/servers.json"
+{
+  "Servers": {
+    "1": {
+      "Name": "Denaro Postgres Databases",
+      "Group": "Servers",
+      "Host": "${DENARO_DATABASE_HOST}",
+      "Port": 5432,
+      "MaintenanceDB": "postgres",
+      "Username": "${POSTGRES_USER}",
+      "PassFile": "${pgpass_file}",
+      "UseSSHTunnel": 0,
+      "TunnelPort": "22",
+      "TunnelAuthentication": 0,
+      "KerberosAuthentication": false,
+      "SSLMode": "prefer"
+    }
+  }
+}
 EOF
 
-echo "Generated .env file:"
-cat /app/.env
-echo "----------------------------------------"
+  log INFO "Writing pgpass file"
+  echo "*:*:postgres:${POSTGRES_USER}:${POSTGRES_PASSWORD}" > "${pgpass_file}"
+  chmod 700 "${pgadmin_config_dir}" || true
+  chmod 600 "${pgadmin_config_dir}/servers.json" || true
+  chmod 600 "${pgpass_file}" || true
 
-# Database provisioning
-echo "Setting up database: ${DB_NAME}"
-export PGPASSWORD="${POSTGRES_PASSWORD}"
+  log INFO "Executing official pgadmin4 entrypoint"
+  exec /entrypoint.sh "$@"
+}
 
-# Wait until Postgres reports readiness
-until pg_isready -h "${DENARO_DATABASE_HOST}" -U "${POSTGRES_USER}" > /dev/null 2>&1; do
-  echo "Postgres is unavailable - sleeping"
-  sleep 1
-done
-echo "PostgreSQL is ready."
 
-# Create database if missing and import schema only on first creation
-if ! psql -h "${DENARO_DATABASE_HOST}" -U "${POSTGRES_USER}" -d "postgres" -tc "SELECT 1 FROM pg_database WHERE datname = '${DB_NAME}'" | grep -q 1; then
-  echo "Database '${DB_NAME}' does not exist. Creating..."
-  psql -h "${DENARO_DATABASE_HOST}" -U "${POSTGRES_USER}" -d "postgres" -c "CREATE DATABASE \"${DB_NAME}\""
-  echo "Importing database schema from schema.sql..."
-  psql -h "${DENARO_DATABASE_HOST}" -U "${POSTGRES_USER}" -d "${DB_NAME}" < denaro/schema.sql
-else
-  echo "Database '${DB_NAME}' already exists."
-fi
+# ------------------------------
+# Entry point
+# ------------------------------
+MODE="${1:-node}"
 
-unset PGPASSWORD
-
-# Launch the Denaro Node
-echo "Starting Denaro node on 0.0.0.0:${DENARO_NODE_PORT}..."
-exec python /app/run_node.py
+case "${MODE}" in
+  pgadmin)
+    shift || true
+    pgadmin_main "$@"
+    ;;
+  node)
+    node_main
+    ;;
+  *)
+    exec "$@"
+    ;;
+esac

@@ -10,7 +10,7 @@ ENV PYTHONUNBUFFERED 1
 # - openssh-client: for the Pinggy.io ssh tunnel command.
 # - wget: required for the HEALTHCHECK command.
 # - build-essential tools (gcc) and dev libraries (libgmp-dev, libpq-dev): for compiling Python packages.
-RUN apt-get update -y && apt-get upgrade -y && apt-get install -y wget libgmp-dev libpq-dev gcc openssh-client postgresql-client && rm -rf /var/lib/apt/lists/*
+RUN apt-get update -y && apt-get upgrade -y && apt-get install -y wget libgmp-dev libpq-dev gcc openssh-client postgresql-client jq && rm -rf /var/lib/apt/lists/*
 
 
 # Set the working directory inside the container
@@ -35,7 +35,7 @@ RUN pip install --no-cache-dir -r ./requirements.txt
 
 # Execute healthcheck to see if the API is responsive.
 # This is crucial for the depends_on: condition: service_healthy in docker-compose.
-# It waits 30s before starting, tries 3 times, with a 3s timeout per try.
+# It waits 60s before starting, checks every 15s, with a 5s timeout and 5 retries.
 HEALTHCHECK --interval=15s --timeout=5s --start-period=60s --retries=5 \
   CMD ./docker/docker-healthcheck.py
 

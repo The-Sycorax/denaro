@@ -7,18 +7,19 @@ Purpose:
 
 Hardcoded paths:
   COMPOSE_FILE = "/project/docker-compose.yml"         (bind-mounted by the 'topology' service)
-  OUTPUT_FILE  = "/shared/node-topology/topology.json" (shared volume mounted read-only into nodes)
+  OUTPUT_FILE  = "/shared/denaro-node-topology/topology.json" (shared volume mounted read-only into nodes)
 
-Output (topology.json):
+Example Output (topology.json):
   {
-    "nodes": ["node-8002", "node-8003", ...],              # node services only
-    "dependents": {                                        # reverse edges among node services
-      "node-8005": ["node-8002"],
-      "node-8002": ["node-8003"],
-      ...
+    "nodes": ["node-3006", "node-3007", "node-3008"],
+    "public_nodes": ["node-3006"],
+    "dependents": 
+    {
+        "node-3006": ["node-3007", "node-3008"],
+        "node-3007": ["node-3008"]
     },
-    "generated_at": "<RFC3339 timestamp>"
-  }
+    "generated_at": "2025-10-14T12:34:56.789012+00:00"
+   }
 
 - Only node->node dependency edges are recorded.
 - A node with no dependents may be absent from 'dependents' or mapped to [].
@@ -33,7 +34,7 @@ from typing import Any, Dict, List, Set
 import yaml  # PyYAML
 
 COMPOSE_FILE = "/project/docker-compose.yml"
-OUTPUT_FILE = "/shared/node-topology/topology.json"
+OUTPUT_FILE = "/shared/denaro-node-topology/topology.json"
 
 
 def atomic_write(path: str, data: bytes) -> None:
@@ -68,6 +69,19 @@ def is_node_service(spec: Dict[str, Any]) -> bool:
     return False
 
 
+def is_public_node(spec: Dict[str, Any]) -> bool:
+    env = spec.get("environment")
+    if isinstance(env, dict):
+        val = env.get("ENABLE_PINGGY_TUNNEL", "false")
+        return str(val).lower() == "true"
+    elif isinstance(env, list):
+        for entry in env:
+            if isinstance(entry, str) and entry.startswith("ENABLE_PINGGY_TUNNEL="):
+                val = entry.split("=", 1)[1]
+                return val.lower() in ("true", "'true'", '"true"')
+    return False
+
+
 def get_upstreams(spec: Dict[str, Any]) -> List[str]:
     dependencies = spec.get("depends_on")
     if dependencies is None:
@@ -86,6 +100,7 @@ def main() -> int:
     services: Dict[str, Dict[str, Any]] = doc.get("services") or {}
 
     node_names: Set[str] = {name for name, spec in services.items() if is_node_service(spec)}
+    public_nodes: Set[str] = {name for name, spec in services.items() if is_node_service(spec) and is_public_node(spec)}
 
     # Build reverse mapping: upstream_node -> [dependent_nodes...]
     dependents: Dict[str, List[str]] = {name: [] for name in node_names}
@@ -98,6 +113,7 @@ def main() -> int:
 
     topology = {
         "nodes": sorted(node_names),
+        "public_nodes": sorted(public_nodes),
         "dependents": {k: sorted(v) for k, v in dependents.items() if v},
         "generated_at": datetime.now(timezone.utc).isoformat(),
     }

@@ -59,7 +59,8 @@
 * **[Avecci-Claussen](https://github.com/Avecci-Claussen) / [Denaro-Vanity-Gen](https://github.com/Avecci-Claussen/Denaro-Vanity-Gen)**
 
 ### Links:
-* **New Website: [https://denaro.mine.bz](https://denaro.mine.bz/)**
+* **Current Website (Stale): [https://denaro.is](https://denaro.is/)**
+* **New Unofficial Website: [https://denaro.mine.bz](https://denaro.mine.bz/)**
 * **Denaro Node: [https://node.denaro.network](https://node.denaro.network/)**
 * **Block Explorer: [https://denaro-explorer.aldgram-solutions.fr](https://denaro-explorer.aldgram-solutions.fr/)**
 * **Discord Server: [https://discord.gg/4Sq2dK4KMv](https://discord.gg/4Sq2dK4KMv)**
@@ -69,6 +70,8 @@
 ## Node Setup
 
 **Automated configuration and deployment of a Denaro node can be achieved by using either the `setup.sh` script or `Docker`. Both methods ensure that all prerequisites for operating a Denaro node are met and properly configured according to the user's preference.**
+
+**It is reccomended to review the [Environment Configuration](#environment-configuration) section before setting up a Denaro node.**
 
 <details>
 <summary><b>Setup via setup.sh:</b></summary>
@@ -172,8 +175,14 @@ git clone https://github.com/The-Sycorax/denaro.git
 # Change directory to the cloned repository.
 cd denaro 
 
-docker volume create denaro_postgres_data
+# Create the PostgreSQL volume
+docker volume create denaro_postgres_volume
+
+# Run the Docker containers
 docker compose -f ./docker/docker-compose.yml up --build --force-recreate -d
+
+# Optionally show node logs
+docker logs -f <container-name>
 ```
 
 </dl></dd>
@@ -184,7 +193,7 @@ docker compose -f ./docker/docker-compose.yml up --build --force-recreate -d
 
 <dl><dd>
 
-***For documentation related to Denaro's Docker setup, please refer to: [2025-09-18-refactor(docker).md](https://github.com/The-Sycorax/denaro/blob/main/changelogs/2025/09/2025-09-18-refactor(docker).md) and [2025-10-14-refactor(docker).md](https://github.com/The-Sycorax/denaro/blob/main/changelogs/2025/10/2025-10-14-refactor(docker).md).***
+***For documentation related to Denaro's Docker setup, please refer to: [2025-09-18-refactor(docker).md](https://github.com/The-Sycorax/denaro/blob/main/changelogs/2025/09/2025-09-18-refactor(docker).md) and [2025-10-14-refactor(docker).md](https://github.com/The-Sycorax/denaro/blob/main/changelogs/2025/10/2025-10-14-refactor(docker).md). Please note that some information may be outdated.***
 
 To add or modify nodes in `docker-compose.yml`, use the structure outlined in the examples below.
 
@@ -196,49 +205,30 @@ To add or modify nodes in `docker-compose.yml`, use the structure outlined in th
 <dl><dd>
 
 ```yaml
-  node-3006:
+  denaro-node-3006:
     <<: *denaro-node-base
-    hostname: node-3006
+    image: denaro-node-3006
+    container_name: denaro-node-3006
+    hostname: denaro-node-3006
     volumes:
-      - node_3006_data:/app
-      - node-registry:/shared/node-registry
-      - node-topology:/shared/node-topology:ro
+      - denaro_node_3006_volume:/app
+      - denaro_node_registry_volume:/shared/denaro-node-registry
+      - denaro_node_topology_volume:/shared/denaro-node-topology:ro
     depends_on:
-      topology: { condition: service_completed_successfully }
+      denaro-node-topology: { condition: service_completed_successfully }
       postgres: { condition: service_started }
-    ports: ["3006:3006"]
+    ports: [ "3006:3006" ]
     environment:
-      <<: *denaro-node-env
-      NODE_NAME: 'node-3006'
+      NODE_NAME: 'denaro-node-3006'
       DENARO_NODE_PORT: '3006'
-      
-      # This variable specifies either the selection criteria or a fixed address for the bootstrap-node.
-      # It essentially connects the node to Denaro's P2P Network. Defaults to 'self' if left blank.
-      # Accepted values:
-      #   - 'self': Uses the node’s own internal address. If this value is set but no peers connect to this
-      #           node, then it will be isolated from the rest of P2P network. 
-      #   - 'discover': Selects an address from the shared peer registry at /registry/public_nodes.txt.
-      #   - The address of a Denaro Node that is reachable via the Internet or internal network.
       DENARO_BOOTSTRAP_NODE: 'https://node.denaro.network'
-      
-      # This variable enables public tunnleing via Pinggy.io for up to 60 minutes.
       #ENABLE_PINGGY_TUNNEL: 'true'
- 
-      # This variable specifies the the publically reachable address of the node itself, and is required for
-      # publically facing nodes. When left blank it will default to http://${NODE_NAME}:${DENARO_NODE_PORT}. 
-      # Setting ENABLE_PINGGY_TUNNEL to 'true' will override this variable with the public URL that is
-      # assigneed to the node via Pinggy.io.
-      DENARO_SELF_URL: ''
+      #DENARO_SELF_URL: ''
 
+# Ensure the node's volume is added
 volumes:
-  node-topology:
-  node-registry:
-  postgres_data:
-  node_3006_data:
-
-networks:
-  denaro-net:
-    driver: bridge
+  denaro_node_3006_volume:
+    name: denaro_node_3006_volume
 ```
 
 </dd></dl>
@@ -250,91 +240,85 @@ networks:
 <dl><dd>
 
 ```yaml
-  node-3006:
+  # First Node
+  denaro-node-3006:
     <<: *denaro-node-base
-    hostname: node-3006
+    image: denaro-node-3006
+    container_name: denaro-node-3006
+    hostname: denaro-node-3006
     volumes:
-      - node_3006_data:/app
-      - node-registry:/shared/node-registry
-      - node-topology:/shared/node-topology:ro
+      - denaro_node_3006_volume:/app
+      - denaro_node_registry_volume:/shared/denaro-node-registry
+      - denaro_node_topology_volume:/shared/denaro-node-topology:ro
     depends_on:
-      topology: { condition: service_completed_successfully }
+      denaro-node-topology: { condition: service_completed_successfully }
       postgres: { condition: service_started }
-    ports: ["3006:3006"]
+    ports: [ "3006:3006" ]
     environment:
-      <<: *denaro-node-env
-      NODE_NAME: 'node-3006'
+      NODE_NAME: 'denaro-node-3006'
       DENARO_NODE_PORT: '3006'
-      
-      # This variable specifies either the selection criteria or a fixed address for the bootstrap-node.
-      # It essentially connects the node to Denaro's P2P Network. Defaults to 'self' if left blank.
-      # Accepted values:
-      #   - 'self': Uses the node’s own internal address. If this value is set but no peers connect to this
-      #           node, then it will be isolated from the rest of P2P network. 
-      #   - 'discover': Selects an address from the shared peer registry at /registry/public_nodes.txt.
-      #   - The address of a Denaro Node that is reachable via the Internet or internal network.
       DENARO_BOOTSTRAP_NODE: 'https://node.denaro.network'
-      
-      # This variable enables public tunnleing via Pinggy.io for up to 60 minutes.
       #ENABLE_PINGGY_TUNNEL: 'true'
- 
-      # This variable specifies the the publically reachable address of the node itself, and is required for
-      # publically facing nodes. When left blank it will default to http://${NODE_NAME}:${DENARO_NODE_PORT}. 
-      # Setting ENABLE_PINGGY_TUNNEL to 'true' will override this variable with the public URL that is
-      # assigneed to the node via Pinggy.io.
-      DENARO_SELF_URL: ''
+      #DENARO_SELF_URL: ''
 
-  # Second node - connects to first node
-  node-3007:
+  # Second Node
+  denaro-node-3007:
     <<: *denaro-node-base
-    hostname: node-3007
+    image: denaro-node-3007
+    container_name: denaro-node-3007
+    hostname: denaro-node-3007
     volumes:
-      - node_3007_data:/app
-      - node-registry:/shared/node-registry
-      - node-topology:/shared/node-topology:ro
+      - denaro_node_3007_volume:/app
+      - denaro_node_registry_volume:/shared/denaro-node-registry
+      - denaro_node_topology_volume:/shared/denaro-node-topology:ro
     depends_on:
-      topology: { condition: service_completed_successfully }
+      denaro-node-topology: { condition: service_completed_successfully }
       postgres: { condition: service_started }
-      node-3006: { condition: service_healthy }
-    # Uncomment to access the node outside of docker.
-    #ports: ["3007:3007"]
+
+      # This condition is meant for proper startup ordering, but is really only
+      # nessessary if the DENARO_BOOTSTRAP_NODE variable is set to a node that
+      # is already present in the compose file. 
+      denaro-node-3006: { condition: service_healthy }
+
+    ports: [ "3007:3007" ]
     environment:
-      <<: *denaro-node-env
-      NODE_NAME: 'node-3007'
+      NODE_NAME: 'denaro-node-3007'
       DENARO_NODE_PORT: '3007'
-      DENARO_BOOTSTRAP_NODE: 'http://node-3006:3006'
+      DENARO_BOOTSTRAP_NODE: 'http://denaro-node-3006:3006'  # Connects to first node
 
-  # Third node - connects to second node
-  node-3008:
+  # Third Node
+  denaro-node-3008:
     <<: *denaro-node-base
-    hostname: node-3008
+    image: denaro-node-3008
+    container_name: denaro-node-3008
+    hostname: denaro-node-3008
     volumes:
-      - node_3008_data:/app
-      - node-registry:/shared/node-registry
-      - node-topology:/shared/node-topology:ro
+      - denaro_node_3008_volume:/app
+      - denaro_node_registry_volume:/shared/denaro-node-registry
+      - denaro_node_topology_volume:/shared/denaro-node-topology:ro
     depends_on:
-      topology: { condition: service_completed_successfully }
+      denaro-node-topology: { condition: service_completed_successfully }
       postgres: { condition: service_started }
-      node-3007: { condition: service_healthy }
-    # Uncomment to access the node outside of docker.
-    #ports: ["3008:3008"]
+      
+      # This condition is meant for proper startup ordering, but is really only
+      # nessessary if the DENARO_BOOTSTRAP_NODE variable is set to a node that
+      # is already present in the compose file. 
+      denaro-node-3007: { condition: service_healthy }
+
+    ports: [ "3008:3008" ]
     environment:
-      <<: *denaro-node-env
-      NODE_NAME: 'node-3008'
+      NODE_NAME: 'denaro-node-3008'
       DENARO_NODE_PORT: '3008'
-      DENARO_BOOTSTRAP_NODE: 'http://node-3007:3007'
+      DENARO_BOOTSTRAP_NODE: 'http://denaro-node-3007:3007' # Connects to second node
 
+# Ensure that the volumes of additional nodes are added
 volumes:
-  node-topology:
-  node-registry:
-  postgres_data:
-  node_3006_data:
-  node_3007_data:
-  node_3008_data:
-
-networks:
-  denaro-net:
-    driver: bridge
+  denaro_node_3006_volume:
+    name: denaro_node_3006_volume
+  denaro_node_3007_volume:
+    name: denaro_node_3007_volume
+  denaro_node_3008_volume:
+    name: denaro_node_3007_volume
 ```
 
 </dd></dl>
@@ -347,11 +331,11 @@ networks:
 
 <dl><dd>
 
-***This information is meant to document the correct requirements for the Docker setup. This applies primarily to advanced setups and custom configurations. The default `docker-compose.yml` and examples above already satisfy these requirements.***
+**This information is meant to document the correct requirements for the Docker setup. This applies primarily to advanced setups and custom configurations. *The default docker-compose.yml and examples above already satisfy these requirements.***
 
 - Each node service must include the `<<: *denaro-node-base` merge. This ensures that Docker Compose applies the required `denaro.node=true` label, mounts the shared volumes, and establishes the baseline dependencies on services that are required by the entrypoint script.
 
-- Each node service requires its own dedicated volume (for example, `node_3006_data`) mounted to `/app`. This volume preserves the node's blockchain data, configuration files, and application state across container restarts. Additionally, this volume should not be shared with other nodes, doing so may result in data loss.
+- Each node service requires its own dedicated volume (for example, `denaro_node_3006_volume`) mounted to `/app`. This volume preserves the node's configuration files, and application state across container restarts. Additionally, this volume should not be shared with other nodes, doing so may result in unexpected behavior.
 
 - Each node service must be assigned a unique `NODE_NAME` and `DENARO_NODE_PORT` value. The entrypoint script uses these values to derive per-node database names and healthcheck targets. Duplicate values will cause database conflicts and prevent proper node identification.
 
@@ -372,6 +356,400 @@ networks:
 
 ---
 
+## Environment Configuration
+
+Denaro uses environment variables for node and database configuration. In a standard setup without Docker, these can be managed through a `.env` file in Denaro's root directory. **All variable values should be enclosed in quotes.**
+
+<details>
+<summary><b>Environment Variables:</b></summary>
+<dl><dd>  
+<dl><dd>
+
+<details>
+<summary><b>Node Configuration:</b></summary>
+<dl><dd>
+<dl><dd>
+
+  <details>
+  <summary><code>DENARO_NODE_HOST</code>:</summary>
+  <dl><dd>
+
+  - *&lt;str&gt;*: The hostname or IP address the node binds to. 
+  
+  - **Required.**
+    
+  - **Default**: `127.0.0.1`
+
+  </dd></dl>
+  </details>
+
+  <details>
+  <summary><code>DENARO_NODE_PORT</code>:</summary>
+  <dl><dd>
+
+  - *&lt;str&gt;*: The port the node listens on for incoming connections.
+    
+  - **Required.**
+
+  - **Default**: `3006`
+
+  </dd></dl>
+  </details>
+
+  <details>
+  <summary><code>NODE_NAME</code>:</summary>
+  <dl><dd>
+
+  - *&lt;str&gt;*: A unique identifier for the node within the Docker Compose file. This variable is required since the entrypoint script uses its value to derive `DENARO_DATABASE_NAME`, as well as `DENARO_SELF_URL` when it is not explicitly set.
+
+  - Should match the container name of the node service.
+    
+  - **Required; Docker only.**
+
+  </dd></dl>
+  </details>
+
+  <details>
+  <summary><code>DENARO_BOOTSTRAP_NODE</code>:</summary>
+  <dl><dd>
+
+  - *&lt;str&gt;*: Specifies the bootstrap-node to connect to. This can be any Denaro node that is reachable via the Internet or internal network. It is used for joining Denaro's P2P network (mainnet or isolated), and discovering additional peers.
+
+  - The accepted values are different based on the setup type:
+    
+    <dl><dd>
+    <details>
+    <summary><b>Standard Setup:</b></summary>
+    <dl><dd>
+
+    - `<url>`: Fixed HTTP(S) address of a Denaro Node.
+
+    </dd></dl>
+    </details>
+
+    <details>
+    <summary><b>Docker Setup:</b></summary>
+    <dl><dd>
+
+    In the Docker setup, this variable specifies either the selection criteria, a node name, or a fixed HTTP(S) address of the bootstrap-node.
+
+    - `'self'`: Bootstraps against the node's own address (`DENARO_SELF_URL`). The node starts with no peers and remains isolated unless others connect to it.
+      
+    - `<url>`: Fixed HTTP(S) address of a Denaro Node.
+      
+    - `<node-name>`: The `NODE_NAME` of another node in the compose file. The target node must be public (with `ENABLE_PINGGY_TUNNEL=true`). The entrypoint script waits up to 120s for the target to publish its URL to the registry. Falls back to `'self'` if unavailable.
+      
+    - `'random'`: Randomly selects a bootstrap-node from all other public nodes (with `ENABLE_PINGGY_TUNNEL=true`) in the compose file. The entrypoint script waits up to 120s for all public nodes to register before choosing. Falls back to `'self'` if no public nodes are available.
+
+    </dd></dl>
+    </details>
+
+    </dd></dl>
+
+  - **Optional.**
+
+  - **Default**: `https://node.denaro.network`
+
+  </dd></dl>
+  </details>
+
+  <details>
+  <summary><code>DENARO_SELF_URL</code>:</summary>
+  <dl><dd>
+
+  - *&lt;str&gt;*: Specifies the HTTP(S) address of the node itself, reachable via the Internet or internal network. Other peers use this address to connect back to the node, and is required for publicly facing nodes.
+  
+  - When left unset or is set to a local address, the node will operate as a private node.
+  
+  <dl><dd>
+  <details>
+  <summary><b>Docker Setup:</b></summary>
+  <dl><dd>
+  
+  - `DENARO_SELF_URL` should only be directly specified if the node is publicly facing. Otherwise, the entrypoint script will set it automatically in one of two ways:
+      
+    - If left unset, its value is derived from `NODE_NAME` and `DENARO_NODE_PORT` as `http://{NODE_NAME}:{DENARO_NODE_PORT}`.
+  
+    - If `ENABLE_PINGGY_TUNNEL='true'`, its value is overridden with the public URL assigned to the node by Pinggy.io.
+  
+  </dd></dl>
+  </details>
+
+  </dd></dl>
+
+  - **Optional; Docker only.**
+  
+  - **Default**: `unset`
+  
+  </details>
+
+  <details>
+  <summary><code>ENABLE_PINGGY_TUNNEL</code>:</summary>
+  <dl><dd>
+
+  - *&lt;str-bool&gt;*: Enables public tunneling via Pinggy.io for up to 60 minutes. This overrides `DENARO_SELF_URL` with the public URL assigned to the node by Pinggy. Useful for testing public node behavior over the Internet.
+    
+  - **Optional; Docker only.**
+
+  - **Default**: `'false'`
+
+  </dd></dl>
+  </details>
+
+</dd></dl>
+</details>
+
+<details>
+<summary><b>Database Configuration:</b></summary>
+<dl><dd>
+<dl><dd>
+
+  <details>
+  <summary><code>POSTGRES_USER</code>:</summary>
+  <dl><dd>
+
+  - *&lt;str&gt;*: The PostgreSQL username used to authenticate with the database.
+    
+  - **Required.**
+
+  - **Default**: `'denaro'`
+
+  </dd></dl>
+  </details>
+
+  <details>
+  <summary><code>POSTGRES_PASSWORD</code>:</summary>
+  <dl><dd>
+
+  - *&lt;str&gt;*: The password for the PostgreSQL user.
+    
+  - **Required.**
+
+  - **Default**: `'denaro'`
+
+  </dd></dl>
+  </details>
+
+  <details>
+  <summary><code>DENARO_DATABASE_NAME</code>:</summary>
+  <dl><dd>
+
+  - *&lt;str&gt;*: The name of the node's PostgreSQL database.
+  
+  <dl><dd>
+  <details>
+  <summary><b>Docker Setup:</b></summary>
+  <dl><dd>
+     
+  - In the Docker setup, `DENARO_DATABASE_NAME` should not be directly specified. It is automatically set from `NODE_NAME` by the entrypoint script, with hyphens replaced by underscores.
+  
+  </dd></dl>
+  </details>
+
+  </dd></dl>
+
+  - **Required for the standard setup, but not required for the Docker setup.**
+  
+  - **Default**: `'denaro'`
+  
+  </details>
+
+  <details>
+  <summary><code>DENARO_DATABASE_HOST</code>:</summary>
+  <dl><dd>
+
+  - *&lt;str&gt;*: The hostname or IP address of the PostgreSQL server.
+    
+  - **Required.**
+
+  - **Default**: `'127.0.0.1'`
+
+  </dd></dl>
+  </details>
+
+  <details>
+  <summary><code>DOCKER_ENABLE_PGADMIN</code>:</summary>
+  <dl><dd>
+
+  - *&lt;str-bool&gt;*: Toggles the pgAdmin container for browser-based database management.
+    
+  - **Optional; Docker only.**
+    
+  - **Default**: `'false'`
+
+  </dd></dl>
+  </details>
+
+</dd></dl>
+</details>
+
+<details>
+<summary><b>Logging Configuration:</b></summary>
+<dl><dd>
+<dl><dd>
+
+  <details>
+  <summary><code>LOG_LEVEL</code>:</summary>
+  <dl><dd>
+
+  - *&lt;str&gt;*: Specifies the logging verbosity level (e.g., `DEBUG`, `INFO`, `WARNING`, `ERROR`).
+    
+  - **Optional.**
+
+  - **Default**: `'INFO'`
+
+  </dd></dl>
+  </details>
+
+  <details>
+  <summary><code>LOG_FORMAT</code>:</summary>
+  <dl><dd>
+
+  - *&lt;str&gt;*: Specifies the log message string using standard Python `logging` format specifiers.
+    
+  - **Optional.**
+
+  - **Default**: `'%(asctime)s - %(levelname)s - %(name)s - %(message)s'`
+
+  </dd></dl>
+  </details>
+
+  <details>
+  <summary><code>LOG_DATE_FORMAT</code>:</summary>
+  <dl><dd>
+
+  - *&lt;str&gt;*: Specifies the date format for log timestamps using standard `strftime` directives.
+    
+  - **Optional.**
+
+  - **Default**: `'%Y-%m-%dT%H:%M:%S'`
+
+  </dd></dl>
+  </details>
+
+  <details>
+  <summary><code>LOG_CONSOLE_HIGHLIGHTING</code>:</summary>
+  <dl><dd>
+
+  - *&lt;str-bool&gt;*: Toggles Rich console syntax highlighting for log outputs.
+    
+  - **Optional.**
+
+  - **Default**: `'true'`
+
+  </dd></dl>
+  </details>
+
+  <details>
+  <summary><code>LOG_INCLUDE_REQUEST_CONTENT</code>:</summary>
+  <dl><dd>
+
+  - *&lt;str-bool&gt;*: Toggles HTTP request body content in the log.
+    
+  - **Optional.**
+
+  - **Default**: `'false'`
+
+  </dd></dl>
+  </details>
+
+  <details>
+  <summary><code>LOG_INCLUDE_RESPONSE_CONTENT</code>:</summary>
+  <dl><dd>
+
+  - *&lt;str-bool&gt;*: Toggles HTTP response body content in the log.
+    
+  - **Optional.**
+
+  - **Default**: `'false'`
+
+  </dd></dl>
+  </details>
+
+  <details>
+  <summary><code>LOG_INCLUDE_BLOCK_SYNC_MESSAGES</code>:</summary>
+  <dl><dd>
+
+  - *&lt;str-bool&gt;*: Toggles verbose blockchain synchronization messages in the log.
+   
+  - **Optional.**
+
+  - **Default**: `'false'`
+
+  </dd></dl>
+  </details>
+
+</dd></dl>
+</details>
+
+</dd></dl>
+</details>
+
+<details>
+<summary><b>Docker Setup Configuration:</b></summary>
+<dl><dd>
+<dl><dd>
+
+When deploying a Denaro node with Docker, configuration is split between a globally shared `.env` file and per-container configuration via the `docker-compose.yml` file. This is to prevent variable overriding conflicts.
+
+<details>
+<summary><b>Global <code>.env</code> Variables:</b></summary>
+<dl><dd>
+
+These variables should only be included in the `.env` file, are shared across all containers, and are required for the Docker setup.
+
+- `POSTGRES_USER`
+
+- `POSTGRES_PASSWORD`
+
+- `DENARO_DATABASE_HOST`
+
+- `DENARO_NODE_HOST`
+
+- `DOCKER_ENABLE_PGADMIN`
+
+</dd></dl>
+</details>
+
+<details>
+<summary><b>Per-Node Variables (<code>docker-compose.yml</code>):</b></summary>
+<dl><dd>
+
+These variables should be configured per-node within the `docker-compose.yml` environment block. They should **not** be included in the `.env` file.
+
+- `NODE_NAME`
+
+- `DENARO_NODE_PORT`
+
+- `DENARO_BOOTSTRAP_NODE`
+
+- `DENARO_SELF_URL`
+
+- `ENABLE_PINGGY_TUNNEL`
+
+</dd></dl>
+</details>
+
+<details>
+<summary><b>Important Notes:</b></summary>
+<dl><dd>
+
+- `DENARO_DATABASE_NAME` should not be directly specified. It is automatically set from `NODE_NAME` by the entrypoint script, with hyphens replaced by underscores.
+
+- `DENARO_SELF_URL` should only be directly specified if the node is publicly facing. Otherwise, the entrypoint script will set it automatically in one of two ways:
+  - If left unset, it's value is derived from `NODE_NAME` and `DENARO_NODE_PORT` as `http://{NODE_NAME}:{DENARO_NODE_PORT}`.
+  
+  - If `ENABLE_PINGGY_TUNNEL='true'`, it's value is overridden with the public URL assigned to the node by Pinggy.io.
+
+- Logging configuration variables can be set in either the `.env` file to apply globally, or per-node in the `docker-compose.yml` file.*
+
+</dd></dl>
+</details>
+
+</dd></dl>
+</details>
+
+---
 
 ## Running a Denaro Node
 

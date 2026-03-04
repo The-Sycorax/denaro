@@ -4,26 +4,23 @@ x-denaro-node-base: &denaro-node-base
     dockerfile: "./docker/Dockerfile"
   restart: unless-stopped
   working_dir: /app
-  env_file: ["../.env"]
-  labels: ["denaro.node=true"]
-  networks: [denaro-net]
+  env_file: [ "../.env" ]
+  labels: [ "denaro.node=true" ]
+  networks: [ denaro-network ]
   volumes:
     - type: volume
       target: /app
     - type: volume
-      source: node-registry
-      target: /shared/node-registry
+      source: denaro_node_registry_volume
+      target: /shared/denaro-node-registry
     - type: volume
-      source: node-topology
-      target: /shared/node-topology
+      source: denaro_node_topology_volume
+      target: /shared/denaro-node-topology
       read_only: true
-  environment:
-    &denaro-node-env
-    DENARO_DATABASE_HOST: 'postgres'
-    DENARO_NODE_HOST: '0.0.0.0'
 
 services:
-  topology:
+  denaro-node-topology:
+    container_name: denaro-node-topology
     image: python:3.12-alpine
     working_dir: /app
     command: >
@@ -31,54 +28,107 @@ services:
     volumes:
       - ./generate-topology.py:/app/generate-topology.py:ro
       - ./docker-compose.yml:/project/docker-compose.yml:ro
-      - node-topology:/shared/node-topology
-    networks: [denaro-net]
+      - denaro_node_topology_volume:/shared/denaro-node-topology
+    networks: [ denaro-network ]
 
   postgres:
+    container_name: denaro-postgres
     image: postgres:14
-    env_file: ["../.env"]
-    volumes: [postgres_data:/var/lib/postgresql/data]
-    networks: [denaro-net]
-
-  node-3006:
-    <<: *denaro-node-base
-    hostname: node-3006
-    volumes: [node_3006_data:/app, node-registry:/shared/node-registry, node-topology:/shared/node-topology:ro]
-    depends_on:
-      topology: { condition: service_completed_successfully }
-      postgres: { condition: service_started }
-    ports: ["3006:3006"]
+    env_file: [ "../.env" ]
+    volumes: [ denaro_postgres_volume:/var/lib/postgresql/data ]
+    ports: [ "5432:5432" ]
+    networks: [ denaro-network ]
     environment:
-      <<: *denaro-node-env
-      NODE_NAME: 'node-3006'
+      POSTGRES_DB: postgres
+
+  denaro-pgadmin:
+    container_name: denaro-pgadmin
+    image: dpage/pgadmin4
+    env_file: [ "../.env" ]
+    entrypoint: [ "/bin/bash", "/app/docker-entrypoint.sh", "pgadmin" ]
+    ports: [ "5050:80" ]
+    networks: [ denaro-network ]
+    volumes:
+      - denaro_pgadmin_volume:/var/lib/pgadmin
+      - ./docker-entrypoint.sh:/app/docker-entrypoint.sh:ro
+    depends_on:
+      postgres: { condition: service_started }
+    environment:
+      PGADMIN_DEFAULT_EMAIL: "admin@admin.com"
+      PGADMIN_DEFAULT_PASSWORD: "admin"
+      PGADMIN_SERVER_JSON_FILE: /var/lib/pgadmin/servers.json
+      PGADMIN_CONFIG_MASTER_PASSWORD_REQUIRED: "False"
+      PGPASSFILE: /var/lib/pgadmin/pgpass
+
+  denaro-node-3006:
+    <<: *denaro-node-base
+    image: denaro-node-3006
+    container_name: denaro-node-3006
+    hostname: denaro-node-3006
+    volumes:
+      - denaro_node_3006_volume:/app
+      - denaro_node_registry_volume:/shared/denaro-node-registry
+      - denaro_node_topology_volume:/shared/denaro-node-topology:ro
+    depends_on:
+      denaro-node-topology: { condition: service_completed_successfully }
+      postgres: { condition: service_started }
+    ports: [ "3006:3006" ]
+    environment:
+      NODE_NAME: 'denaro-node-3006'
       DENARO_NODE_PORT: '3006'
       
-      # This variable specifies either the selection criteria or a fixed address for the bootstrap-node.
-      # It essentially connects the node to Denaro's P2P Network. Defaults to 'self' if left blank.
+      # The DENARO_BOOTSTRAP_NODE variable specifies either the selection criteria, a node name, or a
+      # fixed address of the bootstrap-node. The bootstrap-node can be any Denaro node. It's used for
+      # joining Denaro's P2P network (mainnet or isolated), and discovering additional peers.
+      # Defaults to 'self' when unset.
       # Accepted values:
-      #   - 'self': Uses the node’s own internal address. If this value is set but no peers connect to this
-      #           node, then it will be isolated from the rest of P2P network. 
-      #   - 'discover': Selects an address from the shared peer registry at /registry/public_nodes.txt.
-      #   - The address of a Denaro Node that is reachable via the Internet or internal network.
+      #   'self'        - Bootstraps against the node's own address (DENARO_SELF_URL). The node will
+      #                   start with no external peers and will remain isolated unless other nodes
+      #                   actively connect to it. Useful for the first node in an isolated private
+      #                   network, or for mainnet nodes that will be discovered by others.
+      #
+      #   <url>         - Any HTTP(S) address of a Denaro Node that is reachable via the Internet or
+      #                   internal network. Useful for connecting directly to a mainnet node or a
+      #                   private node on the same network (e.g. http://localhost:3007).
+      #
+      #   <node-name>   - The NODE_NAME of another node in this compose file (e.g. 'denaro-node-3007').
+      #                   The target node must be public (ENABLE_PINGGY_TUNNEL=true). The entrypoint
+      #                   validates the name against the generated topology.json file and waits up
+      #                   to 120s for that node to publish its public URL to the shared registry.
+      #                   Once found, the URL replaces this value. Falls back to 'self' if the
+      #                   name is not a public node in the topology or the wait times out.
+      #
+      #   'random'      - Randomly selects a bootstrap-node from all other public nodes in this compose
+      #                   file. Public nodes are those with `ENABLE_PINGGY_TUNNEL=true`. The entrypoint
+      #                   reads the generated topology.json file to determine which nodes are public
+      #                   and waits up to 120s for all of them to publish their URLs to the shared
+      #                   registry before choosing a random one. Falls back to 'self' if no other
+      #                   public nodes exist or the wait times out.
       DENARO_BOOTSTRAP_NODE: 'https://node.denaro.network'
       
       # This variable enables public tunnleing via Pinggy.io for up to 60 minutes.
       #ENABLE_PINGGY_TUNNEL: 'true'
  
-      # This variable specifies the the publically reachable address of the node itself, and is required for
-      # publically facing nodes. When left blank it will default to http://${NODE_NAME}:${DENARO_NODE_PORT}. 
-      # Setting ENABLE_PINGGY_TUNNEL to 'true' will override this variable with the public URL that is
-      # assigneed to the node via Pinggy.io.
+      # This variable specifies the the publically reachable address of the node itself, and is required
+      # for publically facing nodes. Default to http://${NODE_NAME}:${DENARO_NODE_PORT} when unset. 
+      # Setting ENABLE_PINGGY_TUNNEL to 'true' will override this variable with the public URL that
+      # is assigneed to the node via Pinggy.io.
       DENARO_SELF_URL: ''
 
 volumes:
-  node-topology:
-  node-registry:
-  node_3006_data:
-  postgres_data: 
-    external: true 
-    name: denaro_postgres_data
+  denaro_node_topology_volume:
+    name: denaro_node_topology_volume
+  denaro_node_registry_volume:
+    name: denaro_node_registry_volume
+  denaro_node_3006_volume:
+    name: denaro_node_3006_volume
+  denaro_pgadmin_volume:
+    name: denaro_pgadmin_volume
+  denaro_postgres_volume:
+    external: true
+    name: denaro_postgres_volume
 
 networks:
-  denaro-net:
+  denaro-network:
+    name: denaro-network
     driver: bridge

@@ -11,7 +11,7 @@ Purpose
 Inputs (env)
   NODE_NAME                    [required] service key for this node (e.g., "node-8005")
   DENARO_NODE_PORT             [required] container-internal port (e.g., "8005")
-  TOPOLOGY_FILE                [default "/shared/node-topology/topology.json"]
+  TOPOLOGY_FILE                [default "/shared/denaro-node-topology/topology.json"]
   HEALTHCHECK_READINESS_FILE       [default "/tmp/node_ready"]
 
 Exit codes
@@ -69,7 +69,7 @@ def main() -> int:
     node_port = os.getenv("DENARO_NODE_PORT")
     url = f"http://127.0.0.1:{node_port}/get_status" if node_port else None
     
-    topology_path = os.getenv("TOPOLOGY_FILE", "/shared/node-topology/topology.json")
+    topology_path = os.getenv("TOPOLOGY_FILE", "/shared/denaro-node-topology/topology.json")
     readiness_path = os.getenv("HEALTHCHECK_READINESS_FILE", "/tmp/node_ready")
 
     # Already marked ready
