@@ -607,7 +607,7 @@ Denaro uses environment variables for node and database configuration. In a stan
 
 <dl><dd>
 
-- *&lt;str&gt;*: Specifies the logging verbosity level (e.g., `DEBUG`, `INFO`, `WARNING`, `ERROR`).
+- *&lt;str&gt;*: Specifies the [logging verbosity level](https://docs.python.org/3/library/logging.html#levels) (e.g., `DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`).
 
 - **Optional.**
 
@@ -621,7 +621,7 @@ Denaro uses environment variables for node and database configuration. In a stan
 
 <dl><dd>
 
-- *&lt;str&gt;*: Specifies the log message string using standard Python `logging` format specifiers.
+- *&lt;str&gt;*: Specifies the log message string using standard Python [logging format specifiers](https://docs.python.org/3/library/logging.html#logrecord-attributes).
 
 - **Optional.**
 
@@ -635,7 +635,7 @@ Denaro uses environment variables for node and database configuration. In a stan
 
 <dl><dd>
 
-- *&lt;str&gt;*: Specifies the date format for log timestamps using standard `strftime` directives.
+- *&lt;str&gt;*: Specifies the date format for log timestamps using standard [strftime directives](https://strftime.org/).
 
 - **Optional.**
 
@@ -779,7 +779,7 @@ The PostgreSQL database used by Denaro can be managed through several methods.
 > [!WARNING]
 > Database management is intended for **development and testing purposes only** and should not be used in mainnet node environments.
 >
-> Additionally, it is highly recommended that the PostgreSQL port (5432) and pgAdmin port (5050) are not publicly exposed especially if default credentials are in use, since that would go against basic security standards.
+> Additionally, it is highly recommended that the PostgreSQL port (5432) and pgAdmin port (5050) are not publicly exposed on the Internet, especially if default credentials are in use, since that would go against the most basic of security standards.
 
 <details>
 <summary><b>Management Options:</b></summary>
@@ -812,24 +812,6 @@ PGPASSWORD='<POSTGRES_PASSWORD>' psql -h 127.0.0.1 -p 5432 -U <POSTGRES_USER> -d
 </details>
 
 <details>
-<summary><b>Third-Party GUI Clients:</b></summary>
-
-<dl><dd>
-
-Any PostgreSQL-compatible GUI client can be used to connect to the database. Popular options include:
-
-- **[DBeaver](https://dbeaver.io/)** — A free, cross-platform database tool that supports PostgreSQL and many other databases.
-
-- **[TablePlus](https://tableplus.com/)** — A modern, native GUI client for macOS, Windows, and Linux.
-
-- **[DataGrip](https://www.jetbrains.com/datagrip/)** — A JetBrains IDE with advanced SQL editing and database management features.
-
-To connect, use the nessessary values and credentials defined in the `.env` file. The database should generally be accessible at `127.0.0.1:5432` from the host machine.
-
-</dd></dl>
-</details>
-
-<details>
 <summary><b>pgAdmin (Included in Docker Setup):</b></summary>
 
 <dl><dd>
@@ -852,6 +834,24 @@ It can be enabled by setting the `DOCKER_ENABLE_PGADMIN` variable to `true` in t
 </dd></dl>
 
 > **Note:** The default credentials are intended for local development only. If default credentials are in use, it is highly recommended that the pgAdmin port (`5050`) and PostgreSQL port (`5432`) are not publicly exposed.
+
+</dd></dl>
+</details>
+
+<details>
+<summary><b>Third-Party GUI Clients:</b></summary>
+
+<dl><dd>
+
+Any PostgreSQL-compatible GUI client can be used to connect to the database. Popular options include:
+
+- **[DBeaver](https://dbeaver.io/)** — A free, cross-platform database tool that supports PostgreSQL and many other databases.
+
+- **[TablePlus](https://tableplus.com/)** — A modern, native GUI client for macOS, Windows, and Linux.
+
+- **[DataGrip](https://www.jetbrains.com/datagrip/)** — A JetBrains IDE with advanced SQL editing and database management features.
+
+To connect, use the nessessary values and credentials defined in the `.env` file. The database should generally be accessible at `127.0.0.1:5432` from the host machine.
 
 </dd></dl>
 </details>
