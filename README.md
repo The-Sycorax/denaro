@@ -9,7 +9,7 @@
 <summary><b>Features:</b></summary>
 <dl><dd>
 
-* Proof-of-Work blockchain using SHA256 hashing with dynamic difficulty adjustment every 512 blocks. Blocks are limited to 2MB and can process approximately 3,800 transactions (~21 transactions per second).
+* Proof-of-Work blockchain using SHA256 hashing with dynamic difficulty adjustment every 512 blocks. Blocks are limited to 2MB and can process approximately 3,800 transactions.
   
 * Peer-to-peer network with cryptographic node identity, ECDSA-based request signing, and automatic blockchain synchronization. Includes reputation management, rate limiting, and security measures for network protection.
   
@@ -67,11 +67,17 @@
 
 ---
 
-## Node Setup
+## Startup Guide
+
+<dl><dd>
+
+### Node Setup
+
+<dl><dd>
 
 **Automated configuration and deployment of a Denaro node can be achieved by using either the `setup.sh` script or `Docker`. Both methods ensure that all prerequisites for operating a Denaro node are met and properly configured according to the user's preference.**
 
-**It is reccomended to review the [Environment Configuration](#environment-configuration) section before setting up a Denaro node.**
+**It is highly recommended to review the [Environment Configuration](#environment-configuration) section before setting up a Denaro node.**
 
 <details>
 <summary><b>Setup via setup.sh:</b></summary>
@@ -80,36 +86,33 @@
 
 The `setup.sh` script is designed for traditional configuration and deployment of a single Denaro node. It automatically handles system package updates, manages environment variables, configures the PostgreSQL database, sets up a Python virtual environment, installs the required Python dependencies, and runs the Denaro node.
 
-
-**Quick Start:**
-
-<dl><dd>
-
-  ```bash
-  # Clone the Denaro repository to your local machine.
-  git clone https://github.com/The-Sycorax/denaro.git
-  
-  # Change directory to the cloned repository.
-  cd denaro
-  
-  # Make the setup script executable.
-  chmod +x setup.sh
-  
-  # Execute the setup script with optional arguments if needed.
-  ./setup.sh [--skip-prompts] [--setup-db] [--skip-package-install]
-  ```
-</dl></dd>
+**Commands:**
 
 <dl><dd>
+
+```bash
+# Clone the Denaro repository to your local machine.
+git clone https://github.com/The-Sycorax/denaro.git
+
+# Change directory to the cloned repository.
+cd denaro
+
+# Make the setup script executable.
+chmod +x setup.sh
+
+# Execute the setup script with optional arguments if needed.
+./setup.sh [--skip-prompts] [--setup-db] [--skip-package-install]
+```
+
+</dd></dl>
 
 <details>
 <summary><b>CLI Arguments:</b></summary>
 
 <dl><dd>
-<dl><dd>
 
 - `--skip-prompts`: Executes the setup script in an automated manner without requiring user input, bypassing all interactive prompts.
-  
+
 - `--setup-db`: Limits the setup script's actions to only configure the PostgreSQL database, excluding the execution of other operations such as virtual environment setup and dependency installation.
 
 - `--skip-package-install`: Skips `apt` package installation. This argument can be used for Linux distributions that do not utilize `apt` as a package manager. However, it is important that the required system packages are installed prior to running the setup script (For more details refer to: *Installation for Non-Debian Based Systems*).
@@ -121,12 +124,12 @@ The `setup.sh` script is designed for traditional configuration and deployment o
 <summary><b>Installation for Non-Debian Based Systems:</b></summary>
 
 <dl><dd>
-<dl><dd>
 
- The setup script is designed for Linux distributions that utilize `apt` as their package manager (e.g. Debian/Ubuntu). If system package installation is unsuccessful, it is most likely due to the absence of `apt` on your system. This is generally the case for Non-Debian Linux distributions. Therefore, the required system packages must be installed manually.
+The setup script is designed for Linux distributions that utilize `apt` as their package manager (e.g. Debian/Ubuntu). If system package installation is unsuccessful, it is most likely due to the absence of `apt` on your system. This is generally the case for Non-Debian Linux distributions. Therefore, the required system packages must be installed manually.
 
 <details>
 <summary><b>Required Packages:</b></summary>
+
 <dl><dd>
 
 *Note: It is nessessary to ensure that the package names specified are adjusted to correspond with those recognized by your package manager.*
@@ -138,17 +141,15 @@ The `setup.sh` script is designed for traditional configuration and deployment o
 - `python3`
 - `python3-venv`
 - `sudo`
-  
+
 </dd></dl>
 </details>
 
 Once the required packages have been installed, the `--skip-package-install` argument can be used with the setup script to bypass operations that require `apt`. This should mitigate any unsucessful execution related to package installation, allowing the setup script to proceed.
 
 </dd></dl>
-</dd></dl>
 </details>
 
-</dd></dl>
 </dd></dl>
 </details>
 
@@ -159,12 +160,11 @@ Once the required packages have been installed, the `--skip-package-install` arg
 
 The Docker setup provides a containerized deployment option for Denaro nodes. Unlike the `setup.sh` script, it encapsulates everything needed to run a Denaro node in isolated Docker containers. This avoids installing dependencies on the host system and prevents conflicts with system packages. Additionally, the Docker setup allows for multi-node deployments, while the `setup.sh` script does not.
 
-At the core of the Docker setup is the `docker-entrypoint.sh` script, which automates the configuration and deployment of each node. When a node's container starts, this script automatically provisions the PostgreSQL database, generates the necessary environment configuration, handles bootstrap node selection, and starts the Denaro node. Docker coordinates the supporting services, shared resources, and startup order of each container. 
+At the core of the Docker setup is the `docker-entrypoint.sh` script, which automates the configuration and deployment of each node. When a node's container starts, this script automatically provisions the PostgreSQL database, generates the necessary environment configuration, handles bootstrap node selection, and starts the Denaro node. Docker coordinates the supporting services, shared resources, and startup order of each container.
 
 To test public node behavior over the Internet, the Docker setup includes optional support for exposing a node on the Internet by establishing an SSH reverse tunnel via [Pinggy.io's free tunnleing service](https://www.pinggy.io). *For more information please refer to: [2025-09-18-refactor(docker).md: Optional Public Node Tunnleing](https://github.com/The-Sycorax/denaro/blob/main/changelogs/2025/09/2025-09-18-refactor(docker).md#optional-public-node-tunnleing)*.
 
-
-**Quick Start:**
+**Commands:**
 
 <dl><dd>
 
@@ -173,7 +173,7 @@ To test public node behavior over the Internet, the Docker setup includes option
 git clone https://github.com/The-Sycorax/denaro.git
 
 # Change directory to the cloned repository.
-cd denaro 
+cd denaro
 
 # Create the PostgreSQL volume
 docker volume create denaro_postgres_volume
@@ -185,9 +185,8 @@ docker compose -f ./docker/docker-compose.yml up --build --force-recreate -d
 docker logs -f <container-name>
 ```
 
-</dl></dd>
+</dd></dl>
 
-<dl><dd>
 <details>
 <summary><b>Custom Node Configuration:</b></summary>
 
@@ -196,8 +195,6 @@ docker logs -f <container-name>
 ***For documentation related to Denaro's Docker setup, please refer to: [2025-09-18-refactor(docker).md](https://github.com/The-Sycorax/denaro/blob/main/changelogs/2025/09/2025-09-18-refactor(docker).md) and [2025-10-14-refactor(docker).md](https://github.com/The-Sycorax/denaro/blob/main/changelogs/2025/10/2025-10-14-refactor(docker).md). Please note that some information may be outdated.***
 
 To add or modify nodes in `docker-compose.yml`, use the structure outlined in the examples below.
-
-<dl><dd>
 
 <details>
 <summary><b>Basic Node Example (Default):</b></summary>
@@ -277,7 +274,7 @@ volumes:
 
       # This condition is meant for proper startup ordering, but is really only
       # nessessary if the DENARO_BOOTSTRAP_NODE variable is set to a node that
-      # is already present in the compose file. 
+      # is already present in the compose file.
       denaro-node-3006: { condition: service_healthy }
 
     ports: [ "3007:3007" ]
@@ -299,10 +296,10 @@ volumes:
     depends_on:
       denaro-node-topology: { condition: service_completed_successfully }
       postgres: { condition: service_started }
-      
+
       # This condition is meant for proper startup ordering, but is really only
       # nessessary if the DENARO_BOOTSTRAP_NODE variable is set to a node that
-      # is already present in the compose file. 
+      # is already present in the compose file.
       denaro-node-3007: { condition: service_healthy }
 
     ports: [ "3008:3008" ]
@@ -323,8 +320,6 @@ volumes:
 
 </dd></dl>
 </details>
-
-</dd></dl>
 
 <details>
 <summary><b>Important Notes:</b></summary>
@@ -347,337 +342,363 @@ volumes:
 </details>
 
 </dd></dl>
-
-</dd></dl>
 </details>
 
 </dd></dl>
 </details>
 
----
+**When running a publically facing node, the node's own port (e.g. 3006) should be exposed to the Internet in order to allow connections to it.**
 
-## Environment Configuration
+
+</dd></dl>
+        
+  ---
+
+### Environment Configuration
+
+<dl><dd>
 
 Denaro uses environment variables for node and database configuration. In a standard setup without Docker, these can be managed through a `.env` file in Denaro's root directory. **All variable values should be enclosed in quotes.**
 
 <details>
 <summary><b>Environment Variables:</b></summary>
-<dl><dd>  
+
 <dl><dd>
 
 <details>
 <summary><b>Node Configuration:</b></summary>
+
 <dl><dd>
+
+<details>
+<summary><code>DENARO_NODE_HOST</code>:</summary>
+
 <dl><dd>
 
-  <details>
-  <summary><code>DENARO_NODE_HOST</code>:</summary>
+- *&lt;str&gt;*: The hostname or IP address the node binds to.
+
+- **Required.**
+
+- **Default**: `127.0.0.1`
+
+</dd></dl>
+</details>
+
+<details>
+<summary><code>DENARO_NODE_PORT</code>:</summary>
+
+<dl><dd>
+
+- *&lt;str&gt;*: The port the node listens on for incoming connections.
+
+- **Required.**
+
+- **Default**: `3006`
+
+</dd></dl>
+</details>
+
+<details>
+<summary><code>NODE_NAME</code>:</summary>
+
+<dl><dd>
+
+- *&lt;str&gt;*: A unique identifier for the node within the Docker Compose file. This variable is required since the entrypoint script uses its value to derive `DENARO_DATABASE_NAME`, as well as `DENARO_SELF_URL` when it is not explicitly set.
+
+- Should match the container name of the node service.
+
+- **Required; Docker only.**
+
+</dd></dl>
+</details>
+
+<details>
+<summary><code>DENARO_BOOTSTRAP_NODE</code>:</summary>
+
+<dl><dd>
+
+- *&lt;str&gt;*: Specifies the bootstrap-node to connect to. This can be any Denaro node that is reachable via the Internet or internal network. It is used for joining Denaro's P2P network (mainnet or isolated), and discovering additional peers.
+
+- The accepted values are different based on the setup type:
+
   <dl><dd>
 
-  - *&lt;str&gt;*: The hostname or IP address the node binds to. 
-  
-  - **Required.**
-    
-  - **Default**: `127.0.0.1`
+  <details>
+  <summary><b>Standard Setup:</b></summary>
 
-  </dd></dl>
+  - `<url>`: Fixed HTTP(S) address of a Denaro Node.
+
   </details>
 
-  <details>
-  <summary><code>DENARO_NODE_PORT</code>:</summary>
-  <dl><dd>
-
-  - *&lt;str&gt;*: The port the node listens on for incoming connections.
-    
-  - **Required.**
-
-  - **Default**: `3006`
-
-  </dd></dl>
-  </details>
-
-  <details>
-  <summary><code>NODE_NAME</code>:</summary>
-  <dl><dd>
-
-  - *&lt;str&gt;*: A unique identifier for the node within the Docker Compose file. This variable is required since the entrypoint script uses its value to derive `DENARO_DATABASE_NAME`, as well as `DENARO_SELF_URL` when it is not explicitly set.
-
-  - Should match the container name of the node service.
-    
-  - **Required; Docker only.**
-
-  </dd></dl>
-  </details>
-
-  <details>
-  <summary><code>DENARO_BOOTSTRAP_NODE</code>:</summary>
-  <dl><dd>
-
-  - *&lt;str&gt;*: Specifies the bootstrap-node to connect to. This can be any Denaro node that is reachable via the Internet or internal network. It is used for joining Denaro's P2P network (mainnet or isolated), and discovering additional peers.
-
-  - The accepted values are different based on the setup type:
-    
-    <dl><dd>
-    <details>
-    <summary><b>Standard Setup:</b></summary>
-    <dl><dd>
-
-    - `<url>`: Fixed HTTP(S) address of a Denaro Node.
-
-    </dd></dl>
-    </details>
-
-    <details>
-    <summary><b>Docker Setup:</b></summary>
-    <dl><dd>
-
-    In the Docker setup, this variable specifies either the selection criteria, a node name, or a fixed HTTP(S) address of the bootstrap-node.
-
-    - `'self'`: Bootstraps against the node's own address (`DENARO_SELF_URL`). The node starts with no peers and remains isolated unless others connect to it.
-      
-    - `<url>`: Fixed HTTP(S) address of a Denaro Node.
-      
-    - `<node-name>`: The `NODE_NAME` of another node in the compose file. The target node must be public (with `ENABLE_PINGGY_TUNNEL=true`). The entrypoint script waits up to 120s for the target to publish its URL to the registry. Falls back to `'self'` if unavailable.
-      
-    - `'random'`: Randomly selects a bootstrap-node from all other public nodes (with `ENABLE_PINGGY_TUNNEL=true`) in the compose file. The entrypoint script waits up to 120s for all public nodes to register before choosing. Falls back to `'self'` if no public nodes are available.
-
-    </dd></dl>
-    </details>
-
-    </dd></dl>
-
-  - **Optional.**
-
-  - **Default**: `https://node.denaro.network`
-
-  </dd></dl>
-  </details>
-
-  <details>
-  <summary><code>DENARO_SELF_URL</code>:</summary>
-  <dl><dd>
-
-  - *&lt;str&gt;*: Specifies the HTTP(S) address of the node itself, reachable via the Internet or internal network. Other peers use this address to connect back to the node, and is required for publicly facing nodes.
-  
-  - When left unset or is set to a local address, the node will operate as a private node.
-  
-  <dl><dd>
   <details>
   <summary><b>Docker Setup:</b></summary>
-  <dl><dd>
-  
-  - `DENARO_SELF_URL` should only be directly specified if the node is publicly facing. Otherwise, the entrypoint script will set it automatically in one of two ways:
-      
-    - If left unset, its value is derived from `NODE_NAME` and `DENARO_NODE_PORT` as `http://{NODE_NAME}:{DENARO_NODE_PORT}`.
-  
-    - If `ENABLE_PINGGY_TUNNEL='true'`, its value is overridden with the public URL assigned to the node by Pinggy.io.
-  
-  </dd></dl>
-  </details>
 
-  </dd></dl>
-
-  - **Optional; Docker only.**
-  
-  - **Default**: `unset`
-  
-  </details>
-
-  <details>
-  <summary><code>ENABLE_PINGGY_TUNNEL</code>:</summary>
   <dl><dd>
 
-  - *&lt;str-bool&gt;*: Enables public tunneling via Pinggy.io for up to 60 minutes. This overrides `DENARO_SELF_URL` with the public URL assigned to the node by Pinggy. Useful for testing public node behavior over the Internet.
-    
-  - **Optional; Docker only.**
+  In the Docker setup, this variable specifies either the selection criteria, a node name, or a fixed HTTP(S) address of the bootstrap-node.
+  
+  </dd></dl>
 
-  - **Default**: `'false'`
+  - `'self'`: Bootstraps against the node's own address (`DENARO_SELF_URL`). The node starts with no peers and remains isolated unless others connect to it.
+
+  - `<url>`: Fixed HTTP(S) address of a Denaro Node.
+
+  - `<node-name>`: The `NODE_NAME` of another node in the compose file. The target node must be public (with `ENABLE_PINGGY_TUNNEL=true`). The entrypoint script waits up to 120s for the target to publish its URL to the registry. Falls back to `'self'` if unavailable.
+
+  - `'random'`: Randomly selects a bootstrap-node from all other public nodes (with `ENABLE_PINGGY_TUNNEL=true`) in the compose file. The entrypoint script waits up to 120s for all public nodes to register before choosing. Falls back to `'self'` if no public nodes are available.
+
+  </details>
 
   </dd></dl>
-  </details>
+
+- **Optional.**
+
+- **Default**: `https://node.denaro.network`
+
+</dd></dl>
+</details>
+
+<details>
+<summary><code>DENARO_SELF_URL</code>:</summary>
+
+<dl><dd>
+
+- *&lt;str&gt;*: Specifies the HTTP(S) address of the node itself, reachable via the Internet or internal network. Other peers use this address to connect back to the node, and is required for publicly facing nodes.
+
+- When left unset or is set to a local address, the node will operate as a private node.
+
+<dl><dd>
+
+
+<details>
+<summary><b>Docker Setup:</b></summary>
+
+
+- `DENARO_SELF_URL` should only be directly specified if the node is publicly facing. Otherwise, the entrypoint script will set it automatically in one of two ways:
+
+  - If left unset, its value is derived from `NODE_NAME` and `DENARO_NODE_PORT` as `http://{NODE_NAME}:{DENARO_NODE_PORT}`.
+
+  - If `ENABLE_PINGGY_TUNNEL='true'`, its value is overridden with the public URL assigned to the node by Pinggy.io.
+
+</details>
+</dd></dl>
+
+
+- **Optional; Docker only.**
+
+- **Default**: `unset`
+
+</dd></dl>
+</details>
+
+<details>
+<summary><code>ENABLE_PINGGY_TUNNEL</code>:</summary>
+
+<dl><dd>
+
+- *&lt;str-bool&gt;*: Enables public tunneling via Pinggy.io for up to 60 minutes. This overrides `DENARO_SELF_URL` with the public URL assigned to the node by Pinggy. Useful for testing public node behavior over the Internet.
+
+- **Optional; Docker only.**
+
+- **Default**: `'false'`
+
+</dd></dl>
+</details>
 
 </dd></dl>
 </details>
 
 <details>
 <summary><b>Database Configuration:</b></summary>
+
 <dl><dd>
+
+<details>
+<summary><code>POSTGRES_USER</code>:</summary>
+
 <dl><dd>
 
-  <details>
-  <summary><code>POSTGRES_USER</code>:</summary>
-  <dl><dd>
+- *&lt;str&gt;*: The PostgreSQL username used to authenticate with the database.
 
-  - *&lt;str&gt;*: The PostgreSQL username used to authenticate with the database.
-    
-  - **Required.**
+- **Required.**
 
-  - **Default**: `'denaro'`
+- **Default**: `'denaro'`
 
-  </dd></dl>
-  </details>
+</dd></dl>
+</details>
 
-  <details>
-  <summary><code>POSTGRES_PASSWORD</code>:</summary>
-  <dl><dd>
+<details>
+<summary><code>POSTGRES_PASSWORD</code>:</summary>
 
-  - *&lt;str&gt;*: The password for the PostgreSQL user.
-    
-  - **Required.**
+<dl><dd>
 
-  - **Default**: `'denaro'`
+- *&lt;str&gt;*: The password for the PostgreSQL user.
 
-  </dd></dl>
-  </details>
+- **Required.**
 
-  <details>
-  <summary><code>DENARO_DATABASE_NAME</code>:</summary>
-  <dl><dd>
+- **Default**: `'denaro'`
 
-  - *&lt;str&gt;*: The name of the node's PostgreSQL database.
-  
-  <dl><dd>
-  <details>
-  <summary><b>Docker Setup:</b></summary>
-  <dl><dd>
-     
-  - In the Docker setup, `DENARO_DATABASE_NAME` should not be directly specified. It is automatically set from `NODE_NAME` by the entrypoint script, with hyphens replaced by underscores.
-  
-  </dd></dl>
-  </details>
+</dd></dl>
+</details>
 
-  </dd></dl>
+<details>
+<summary><code>DENARO_DATABASE_NAME</code>:</summary>
 
-  - **Required for the standard setup, but not required for the Docker setup.**
-  
-  - **Default**: `'denaro'`
-  
-  </details>
+<dl><dd>
 
-  <details>
-  <summary><code>DENARO_DATABASE_HOST</code>:</summary>
-  <dl><dd>
+- *&lt;str&gt;*: The name of the node's PostgreSQL database.
 
-  - *&lt;str&gt;*: The hostname or IP address of the PostgreSQL server.
-    
-  - **Required.**
+<dl><dd>
 
-  - **Default**: `'127.0.0.1'`
+<details>
+<summary><b>Docker Setup:</b></summary>
 
-  </dd></dl>
-  </details>
+- In the Docker setup, `DENARO_DATABASE_NAME` should not be directly specified. It is automatically set from `NODE_NAME` by the entrypoint script, with hyphens replaced by underscores.
 
-  <details>
-  <summary><code>DOCKER_ENABLE_PGADMIN</code>:</summary>
-  <dl><dd>
+</details>
 
-  - *&lt;str-bool&gt;*: Toggles the pgAdmin container for browser-based database management.
-    
-  - **Optional; Docker only.**
-    
-  - **Default**: `'false'`
+</dd></dl>
 
-  </dd></dl>
-  </details>
+- **Required for the standard setup, but not required for the Docker setup.**
+
+- **Default**: `'denaro'`
+
+</dd></dl>
+</details>
+
+<details>
+<summary><code>DENARO_DATABASE_HOST</code>:</summary>
+
+<dl><dd>
+
+- *&lt;str&gt;*: The hostname or IP address of the PostgreSQL server.
+
+- **Required.**
+
+- **Default**: `'127.0.0.1'`
+
+</dd></dl>
+</details>
+
+<details>
+<summary><code>DOCKER_ENABLE_PGADMIN</code>:</summary>
+
+<dl><dd>
+
+- *&lt;str-bool&gt;*: Toggles the pgAdmin container for browser-based database management.
+
+- **Optional; Docker only.**
+
+- **Default**: `'false'`
+
+</dd></dl>
+</details>
 
 </dd></dl>
 </details>
 
 <details>
 <summary><b>Logging Configuration:</b></summary>
+
 <dl><dd>
+
+<details>
+<summary><code>LOG_LEVEL</code>:</summary>
+
 <dl><dd>
 
-  <details>
-  <summary><code>LOG_LEVEL</code>:</summary>
-  <dl><dd>
+- *&lt;str&gt;*: Specifies the logging verbosity level (e.g., `DEBUG`, `INFO`, `WARNING`, `ERROR`).
 
-  - *&lt;str&gt;*: Specifies the logging verbosity level (e.g., `DEBUG`, `INFO`, `WARNING`, `ERROR`).
-    
-  - **Optional.**
+- **Optional.**
 
-  - **Default**: `'INFO'`
+- **Default**: `'INFO'`
 
-  </dd></dl>
-  </details>
+</dd></dl>
+</details>
 
-  <details>
-  <summary><code>LOG_FORMAT</code>:</summary>
-  <dl><dd>
+<details>
+<summary><code>LOG_FORMAT</code>:</summary>
 
-  - *&lt;str&gt;*: Specifies the log message string using standard Python `logging` format specifiers.
-    
-  - **Optional.**
+<dl><dd>
 
-  - **Default**: `'%(asctime)s - %(levelname)s - %(name)s - %(message)s'`
+- *&lt;str&gt;*: Specifies the log message string using standard Python `logging` format specifiers.
 
-  </dd></dl>
-  </details>
+- **Optional.**
 
-  <details>
-  <summary><code>LOG_DATE_FORMAT</code>:</summary>
-  <dl><dd>
+- **Default**: `'%(asctime)s - %(levelname)s - %(name)s - %(message)s'`
 
-  - *&lt;str&gt;*: Specifies the date format for log timestamps using standard `strftime` directives.
-    
-  - **Optional.**
+</dd></dl>
+</details>
 
-  - **Default**: `'%Y-%m-%dT%H:%M:%S'`
+<details>
+<summary><code>LOG_DATE_FORMAT</code>:</summary>
 
-  </dd></dl>
-  </details>
+<dl><dd>
 
-  <details>
-  <summary><code>LOG_CONSOLE_HIGHLIGHTING</code>:</summary>
-  <dl><dd>
+- *&lt;str&gt;*: Specifies the date format for log timestamps using standard `strftime` directives.
 
-  - *&lt;str-bool&gt;*: Toggles Rich console syntax highlighting for log outputs.
-    
-  - **Optional.**
+- **Optional.**
 
-  - **Default**: `'true'`
+- **Default**: `'%Y-%m-%dT%H:%M:%S'`
 
-  </dd></dl>
-  </details>
+</dd></dl>
+</details>
 
-  <details>
-  <summary><code>LOG_INCLUDE_REQUEST_CONTENT</code>:</summary>
-  <dl><dd>
+<details>
+<summary><code>LOG_CONSOLE_HIGHLIGHTING</code>:</summary>
 
-  - *&lt;str-bool&gt;*: Toggles HTTP request body content in the log.
-    
-  - **Optional.**
+<dl><dd>
 
-  - **Default**: `'false'`
+- *&lt;str-bool&gt;*: Toggles Rich console syntax highlighting for log outputs.
 
-  </dd></dl>
-  </details>
+- **Optional.**
 
-  <details>
-  <summary><code>LOG_INCLUDE_RESPONSE_CONTENT</code>:</summary>
-  <dl><dd>
+- **Default**: `'true'`
 
-  - *&lt;str-bool&gt;*: Toggles HTTP response body content in the log.
-    
-  - **Optional.**
+</dd></dl>
+</details>
 
-  - **Default**: `'false'`
+<details>
+<summary><code>LOG_INCLUDE_REQUEST_CONTENT</code>:</summary>
 
-  </dd></dl>
-  </details>
+<dl><dd>
 
-  <details>
-  <summary><code>LOG_INCLUDE_BLOCK_SYNC_MESSAGES</code>:</summary>
-  <dl><dd>
+- *&lt;str-bool&gt;*: Toggles HTTP request body content in the log.
 
-  - *&lt;str-bool&gt;*: Toggles verbose blockchain synchronization messages in the log.
-   
-  - **Optional.**
+- **Optional.**
 
-  - **Default**: `'false'`
+- **Default**: `'false'`
 
-  </dd></dl>
-  </details>
+</dd></dl>
+</details>
+
+<details>
+<summary><code>LOG_INCLUDE_RESPONSE_CONTENT</code>:</summary>
+
+<dl><dd>
+
+- *&lt;str-bool&gt;*: Toggles HTTP response body content in the log.
+
+- **Optional.**
+
+- **Default**: `'false'`
+
+</dd></dl>
+</details>
+
+<details>
+<summary><code>LOG_INCLUDE_BLOCK_SYNC_MESSAGES</code>:</summary>
+
+<dl><dd>
+
+- *&lt;str-bool&gt;*: Toggles verbose blockchain synchronization messages in the log.
+
+- **Optional.**
+
+- **Default**: `'false'`
+
+</dd></dl>
+</details>
 
 </dd></dl>
 </details>
@@ -687,25 +708,22 @@ Denaro uses environment variables for node and database configuration. In a stan
 
 <details>
 <summary><b>Docker Setup Configuration:</b></summary>
-<dl><dd>
+
 <dl><dd>
 
 When deploying a Denaro node with Docker, configuration is split between a globally shared `.env` file and per-container configuration via the `docker-compose.yml` file. This is to prevent variable overriding conflicts.
 
 <details>
 <summary><b>Global <code>.env</code> Variables:</b></summary>
+
 <dl><dd>
 
 These variables should only be included in the `.env` file, are shared across all containers, and are required for the Docker setup.
 
 - `POSTGRES_USER`
-
 - `POSTGRES_PASSWORD`
-
 - `DENARO_DATABASE_HOST`
-
 - `DENARO_NODE_HOST`
-
 - `DOCKER_ENABLE_PGADMIN`
 
 </dd></dl>
@@ -713,18 +731,15 @@ These variables should only be included in the `.env` file, are shared across al
 
 <details>
 <summary><b>Per-Node Variables (<code>docker-compose.yml</code>):</b></summary>
+
 <dl><dd>
 
 These variables should be configured per-node within the `docker-compose.yml` environment block. They should **not** be included in the `.env` file.
 
 - `NODE_NAME`
-
 - `DENARO_NODE_PORT`
-
 - `DENARO_BOOTSTRAP_NODE`
-
 - `DENARO_SELF_URL`
-
 - `ENABLE_PINGGY_TUNNEL`
 
 </dd></dl>
@@ -732,22 +747,114 @@ These variables should be configured per-node within the `docker-compose.yml` en
 
 <details>
 <summary><b>Important Notes:</b></summary>
+
 <dl><dd>
 
 - `DENARO_DATABASE_NAME` should not be directly specified. It is automatically set from `NODE_NAME` by the entrypoint script, with hyphens replaced by underscores.
 
 - `DENARO_SELF_URL` should only be directly specified if the node is publicly facing. Otherwise, the entrypoint script will set it automatically in one of two ways:
-  - If left unset, it's value is derived from `NODE_NAME` and `DENARO_NODE_PORT` as `http://{NODE_NAME}:{DENARO_NODE_PORT}`.
-  
-  - If `ENABLE_PINGGY_TUNNEL='true'`, it's value is overridden with the public URL assigned to the node by Pinggy.io.
 
-- Logging configuration variables can be set in either the `.env` file to apply globally, or per-node in the `docker-compose.yml` file.*
+  - If left unset, its value is derived from `NODE_NAME` and `DENARO_NODE_PORT` as `http://{NODE_NAME}:{DENARO_NODE_PORT}`.
+
+  - If `ENABLE_PINGGY_TUNNEL='true'`, its value is overridden with the public URL assigned to the node by Pinggy.io.
+
+- Logging configuration variables can be set in either the `.env` file to apply globally, or per-node in the `docker-compose.yml` file.
+
+</dd></dl>
+</details>
+
+</dd></dl>
+</details>
+
+</dd></dl>
+
+---
+
+### Database Management
+
+<dl><dd>
+
+The PostgreSQL database used by Denaro can be managed through several methods. 
+
+> [!WARNING]
+> Database management is intended for **development and testing purposes only** and should not be used in mainnet node environments.
+>
+> Additionally, it is highly recommended that the PostgreSQL port (5432) and pgAdmin port (5050) are not publicly exposed especially if default credentials are in use, since that would go against basic security standards.
+
+<details>
+<summary><b>Management Options:</b></summary>
+
+<dl><dd>
+
+<details>
+<summary><b>psql (CLI):</b></summary>
+
+<dl><dd>
+
+`psql` is the official PostgreSQL command-line client and provides direct access to the database. It can be used to run queries, inspect schemas, and perform administrative tasks.
+
+<dl><dd>
+
+```bash
+# Connect to the Denaro database directly
+psql -h 127.0.0.1 -p 5432 -U <POSTGRES_USER> -d <POSTGRES_DB>
+```
+
+*(Replace `<POSTGRES_USER>` and `<POSTGRES_DB>` with the values set in your `.env` file.)*
+
+</dd></dl>
+
+</dd></dl>
+</details>
+
+<details>
+<summary><b>Third-Party GUI Clients:</b></summary>
+
+<dl><dd>
+
+Any PostgreSQL-compatible GUI client can be used to connect to the database. Popular options include:
+
+- **[DBeaver](https://dbeaver.io/)** — A free, cross-platform database tool that supports PostgreSQL and many other databases.
+
+- **[TablePlus](https://tableplus.com/)** — A modern, native GUI client for macOS, Windows, and Linux.
+
+- **[DataGrip](https://www.jetbrains.com/datagrip/)** — A JetBrains IDE with advanced SQL editing and database management features.
+
+To connect, use the host, port, username, and database name defined in your `.env` file. When using Docker, the database is accessible at `127.0.0.1:5432` from the host machine.
+
+</dd></dl>
+</details>
+
+<details>
+<summary><b>pgAdmin (Included in Docker Setup):</b></summary>
+
+<dl><dd>
+
+A [pgAdmin](https://www.pgadmin.org/) container is included in the Docker setup and provides a browser-based GUI for managing the PostgreSQL database. It is accessible from the host machine once the Docker containers are running.
+
+<dl><dd>
+
+**Access:**
+
+| Property | Value |
+|----------|-------|
+| URL | `http://localhost:5050` |
+| Default Email | `admin@admin.com` |
+| Default Password | `admin` |
+
+</dd></dl>
+
+> **Note:** The default credentials are intended for local development only. If default credentials are in use, it is highly recommended that the pgAdmin port (`5050`) and PostgreSQL port (`5432`) are not publicly exposed.
 
 </dd></dl>
 </details>
 
 </dd></dl>
 </details>
+
+</dd></dl>
+
+</dd></dl>
 
 ---
 
