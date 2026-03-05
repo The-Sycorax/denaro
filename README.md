@@ -49,6 +49,7 @@
 * **[StellarisChain](https://github.com/StellarisChain) / [Quasar - Wallet Browser Extension](https://github.com/StellarisChain/quasar)**
 * **[connor33341](https://github.com/connor33341) / [Denaro Pool](https://github.com/connor33341/denaro-pool)**
 * **[connor33341](https://github.com/connor33341) / [DenaroCudaMiner (Solo+Pool)](https://github.com/connor33341/denarocudaminer)**
+* **[Gamer000gaming](https://github.com/Gamer000gaming) / [denaro-faucet](https://github.com/Gamer000gaming/denaro-faucet)**
 * **[witer33](https://github.com/witer33) / [DenaroCudaMiner (Solo)](https://github.com/witer33/denarocudaminer)**
 * **[1460293896](https://github.com/1460293896) / [Denaro CUDA Miner (Pool)](https://github.com/1460293896/denaro-cuda-miner)**
 * **[geiccobs](https://github.com/geiccobs) / [Denaro Solo Miner (CPU)](https://github.com/geiccobs/denaro-solo-miner)**
@@ -59,8 +60,7 @@
 * **[Avecci-Claussen](https://github.com/Avecci-Claussen) / [Denaro-Vanity-Gen](https://github.com/Avecci-Claussen/Denaro-Vanity-Gen)**
 
 ### Links:
-* **Current Website (Stale): [https://denaro.is](https://denaro.is/)**
-* **New Unofficial Website: [https://denaro.mine.bz](https://denaro.mine.bz/)**
+* **New Website: [https://denaro.mine.bz](https://denaro.mine.bz/)**
 * **Denaro Node: [https://node.denaro.network](https://node.denaro.network/)**
 * **Block Explorer: [https://denaro-explorer.aldgram-solutions.fr](https://denaro-explorer.aldgram-solutions.fr/)**
 * **Discord Server: [https://discord.gg/4Sq2dK4KMv](https://discord.gg/4Sq2dK4KMv)**
@@ -797,10 +797,14 @@ The PostgreSQL database used by Denaro can be managed through several methods.
 
 ```bash
 # Connect to the Denaro database directly
-psql -h 127.0.0.1 -p 5432 -U <POSTGRES_USER> -d <POSTGRES_DB>
+PGPASSWORD='<POSTGRES_PASSWORD>' psql -h 127.0.0.1 -p 5432 -U <POSTGRES_USER> -d <DENARO_DATABASE_NAME>
 ```
 
-*(Replace `<POSTGRES_USER>` and `<POSTGRES_DB>` with the values set in your `.env` file.)*
+*Replace `<POSTGRES_PASSWORD>`, and `<POSTGRES_USER>` with the credentials defined in the `.env` file.*
+
+*Also replace `<DENARO_DATABASE_NAME>` with the value defined for it. This will be different based on the setup type:*
+  - In the standard setup it's value is defined in the `.env` file.
+  - In the Docker setup, it's value is automatically set from `NODE_NAME` by the entrypoint script, with hyphens replaced by underscores.
 
 </dd></dl>
 
@@ -820,7 +824,7 @@ Any PostgreSQL-compatible GUI client can be used to connect to the database. Pop
 
 - **[DataGrip](https://www.jetbrains.com/datagrip/)** — A JetBrains IDE with advanced SQL editing and database management features.
 
-To connect, use the host, port, username, and database name defined in your `.env` file. When using Docker, the database is accessible at `127.0.0.1:5432` from the host machine.
+To connect, use the nessessary values and credentials defined in the `.env` file. The database should generally be accessible at `127.0.0.1:5432` from the host machine.
 
 </dd></dl>
 </details>
@@ -830,11 +834,14 @@ To connect, use the host, port, username, and database name defined in your `.en
 
 <dl><dd>
 
-A [pgAdmin](https://www.pgadmin.org/) container is included in the Docker setup and provides a browser-based GUI for managing the PostgreSQL database. It is accessible from the host machine once the Docker containers are running.
+A [pgAdmin](https://www.pgadmin.org/) container is included in the Docker setup and provides a browser-based GUI for managing the PostgreSQL database. 
+
+It can be enabled by setting the `DOCKER_ENABLE_PGADMIN` variable to `true` in the `.env` file, and is accessible from the host machine once the Docker containers are running.
+
+**Access:**
 
 <dl><dd>
 
-**Access:**
 
 | Property | Value |
 |----------|-------|
