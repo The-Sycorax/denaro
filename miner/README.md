@@ -70,15 +70,17 @@
 ### Usage:
 - **Syntax:**
   ```bash
-  cuda_miner.py [-h] --address ADDRESS [--node NODE] [--max-blocks MAX_BLOCKS] [--gpu-blocks BLOCKS] [--gpu-threads THREADS] [--gpu-iterations ITERS_PER_THREAD] [--gpu-arch GPU_ARCH]
+  cuda_miner.py [-h] --address ADDRESS [--node NODE] [--max-blocks MAX_BLOCKS] [--gpu-blocks GPU_BLOCKS] [--gpu-threads GPU_THREADS] [--gpu-iterations GPU_ITERATIONS] --gpu-arch GPU_ARCH [--no-tui] [--verbose]
   ```
 
-- **Options:**        
+- **Options:**
+    * `--help`, `-h`: Shows help message and exits.
+
     * `--address`, `-a`: Mining address to receive rewards *(required)*.
     
-    * `--node`, `-n`: URL of the Denaro node API (Default: http://127.0.0.1:3006/).
+    * `--node`, `-n`: URL of the Denaro node (Default: http://127.0.0.1:3006/).
     
-    * `--max-blocks`, `-m`: Max number of blocks to mine before exit (Default: 10).
+    * `--max-blocks`, `-m`: Max number of blocks to mine before exit. Runs indefinitely when not specified.
     
     * `--gpu-blocks`: CUDA grid blocks per launch (Default: 256).
     
@@ -86,14 +88,17 @@
     
     * `--gpu-iterations`: Iterations per thread per kernel batch (Default: 10000).
     
-    * `--gpu-arch`: Sets the `nvcc` architecture flag (Default: sm_89).
+    * `--gpu-arch`: Sets the `nvcc` architecture flag *(required)*.
+        - To determine the correct architecture flag for your GPU, refer to: [SM architecture reference](https://arnon.dk/matching-sm-architectures-arch-and-gencode-for-various-nvidia-cards/).
     
-      - To determine the correct architecture flag for your GPU, refer to: [SM architecture reference](https://arnon.dk/matching-sm-architectures-arch-and-gencode-for-various-nvidia-cards/).
+    * `--no-tui`: Disables the Textual TUI. Print logs to stdout instead.
+
+    * `--verbose`: Enables DEBUG-level logging.
 
 - **Example:**
 
   ```bash
-    python3 cuda_miner.py -a DZ8CxkXKwcnwQh6aXidBBWE75qvymfg4zZfLqZVP6Qh5A --gpu-arch sm_86
+    python3 cuda_miner.py -a DZ8CxkXKwcnwQh6aXidBBWE75qvymfg4zZfLqZVP6Qh5A --node https://node.denaro.network --gpu-arch sm_86
   ```
 
 ---

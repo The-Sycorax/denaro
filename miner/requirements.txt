@@ -1,0 +1,6 @@
+pycuda~=2025.1.2
+numpy~=2.3.5
+humanfriendly~=10.0
+textual~=0.49.0
+base58~=2.1.1
+requests~=2.32.5
