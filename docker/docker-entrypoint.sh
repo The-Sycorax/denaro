@@ -629,7 +629,8 @@ pgadmin_main() {
 EOF
 
   log INFO "Writing pgpass file"
-  echo "*:*:postgres:${POSTGRES_USER}:${POSTGRES_PASSWORD}" > "${pgpass_file}"
+  echo "*:*:*:${POSTGRES_USER}:${POSTGRES_PASSWORD}" > "${pgpass_file}"
+  chown -R 5050:5050 "${pgadmin_config_dir}" || true
   chmod 700 "${pgadmin_config_dir}" || true
   chmod 600 "${pgadmin_config_dir}/servers.json" || true
   chmod 600 "${pgpass_file}" || true
