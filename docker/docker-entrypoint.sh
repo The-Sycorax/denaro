@@ -539,7 +539,7 @@ node_main() {
 
   # Self URL default
   if [ -z "${DENARO_SELF_URL:-}" ]; then
-    export DENARO_SELF_URL="self"
+    export DENARO_SELF_URL="http://${NODE_NAME}:${DENARO_NODE_PORT}"
   fi
 
   # Bootstrap default
