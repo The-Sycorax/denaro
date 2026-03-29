@@ -821,12 +821,11 @@ PGPASSWORD='<POSTGRES_PASSWORD>' psql -h 127.0.0.1 -p 5432 -U <POSTGRES_USER> -d
 
 A [pgAdmin](https://www.pgadmin.org/) container is included in the Docker setup and provides a browser-based GUI for managing the PostgreSQL database. 
 
-It can be enabled by setting the `DOCKER_ENABLE_PGADMIN` variable to `true` in the `.env` file, and is accessible from the host machine once the Docker containers are running.
+The pgAdmin container can be enabled by setting the `DOCKER_ENABLE_PGADMIN` variable to `true` in the `.env` file, and is accessible from the host machine once the Docker containers are running.
 
 **Access:**
 
 <dl><dd>
-
 
 | Property | Value |
 |----------|-------|
@@ -836,7 +835,7 @@ It can be enabled by setting the `DOCKER_ENABLE_PGADMIN` variable to `true` in t
 
 </dd></dl>
 
-> **Note:** The default credentials are intended for local development only. If default credentials are in use, it is highly recommended that the pgAdmin port (`5050`) and PostgreSQL port (`5432`) are not publicly exposed.
+> **Note:** If the default login credentials are in use, it is highly recommended that the pgAdmin port (`5050`) is not publicly exposed. The default login credentials for pgAdmin can be changed in it's envoronment block within the `docker-compose.yml` file. 
 
 </dd></dl>
 </details>
