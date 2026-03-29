@@ -358,7 +358,9 @@ volumes:
 
 <dl><dd>
 
-Denaro uses environment variables for node and database configuration. In a standard setup without Docker, these can be managed through a `.env` file in Denaro's root directory. **All variable values should be enclosed in quotes.**
+Denaro uses environment variables for node and database configuration. In the standard setup without Docker, all environment vairables are managed through a `.env` file in Denaro's root directory. For the Docker Setup please refer to the [Docker Setup Configuration](#docker-setup-configuration) section. 
+
+**All variable values should be enclosed in quotes.**
 
 <details>
 <summary><b>Environment Variables:</b></summary>
@@ -484,7 +486,7 @@ Denaro uses environment variables for node and database configuration. In a stan
 </dd></dl>
 
 
-- **Optional; Docker only.**
+- **Optional.**
 
 - **Default**: `unset`
 
@@ -706,12 +708,13 @@ Denaro uses environment variables for node and database configuration. In a stan
 </dd></dl>
 </details>
 
+<a id="docker-setup-configuration"></a>
 <details>
 <summary><b>Docker Setup Configuration:</b></summary>
 
 <dl><dd>
 
-When deploying a Denaro node with Docker, configuration is split between a globally shared `.env` file and per-container configuration via the `docker-compose.yml` file. This is to prevent variable overriding conflicts.
+When deploying a Denaro node with Docker, configuration is split between a globally shared `.env` file in Denaro's root directory, and per-container in the `docker-compose.yml` file. This is to prevent variable overriding conflicts, especially for multi-node setups.
 
 <details>
 <summary><b>Global <code>.env</code> Variables:</b></summary>
