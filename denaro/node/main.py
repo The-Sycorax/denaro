@@ -36,7 +36,7 @@ from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 
-from denaro.helpers import timestamp, sha256, transaction_to_json
+from denaro.helpers import timestamp, sha256
 from denaro.logger import get_logger
 
 from denaro.manager import (
