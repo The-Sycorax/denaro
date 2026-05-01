@@ -61,8 +61,14 @@
 
 ### Links:
 * **New Website: [https://denaro.mine.bz](https://denaro.mine.bz/)**
-* **Denaro Node: [https://node.denaro.network](https://node.denaro.network/)**
-* **Block Explorer: [https://denaro-explorer.aldgram-solutions.fr](https://denaro-explorer.aldgram-solutions.fr/)**
+* **Denaro Nodes:**
+  * **[https://node.denaro.network](https://node.denaro.network/)**
+  * **[https://node-2.denaro.network](https://node-2.denaro.network/)**
+  * **[https://denaro-node.aldgram-solutions.fr](https://denaro-node.aldgram-solutions.fr/)**
+
+* **Blockchain Explorers:**
+  * **[https://denaro-explorer.aldgram-solutions.fr](https://denaro-explorer.aldgram-solutions.fr/)**
+  * **[https://denaro-revival.netlify.app](https://denaro-revival.netlify.app/)**
 * **Discord Server: [https://discord.gg/4Sq2dK4KMv](https://discord.gg/4Sq2dK4KMv)**
 
 ---
