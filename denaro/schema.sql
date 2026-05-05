@@ -20,7 +20,7 @@ CREATE TABLE IF NOT EXISTS blocks (
     random BIGINT NOT NULL,
     difficulty NUMERIC(3, 1) NOT NULL,
     reward NUMERIC(14, 6) NOT NULL,
-    timestamp BIGINT,
+    timestamp BIGINT
 );
 
 CREATE TABLE IF NOT EXISTS transactions (
