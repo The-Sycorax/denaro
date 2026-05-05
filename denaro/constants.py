@@ -24,9 +24,9 @@ NODE_DEFAULTS = {
     'DENARO_DATABASE_NAME':            'denaro',
     'DENARO_DATABASE_HOST':            '127.0.0.1',
     'DENARO_NODE_HOST':                '127.0.0.1',
-    'DENARO_NODE_PORT':                '3007',
+    'DENARO_NODE_PORT':                '3006',
     'DENARO_SELF_URL':                 '',
-    'DENARO_BOOTSTRAP_NODE':           'http://node.denaro.network',
+    'DENARO_BOOTSTRAP_NODE':           'https://node.denaro.network',
 }
 
 LOGGER_DEFAULTS = {    
