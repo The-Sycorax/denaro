@@ -2,7 +2,7 @@
 
 **Contributor**: The-Sycorax (https://github.com/The-Sycorax)
 
-**Commit**: TBD
+**Commit**: [bab10540001ab82d076490d95aa583ad0a7ba870](https://github.com/The-Sycorax/denaro/commit/bab10540001ab82d076490d95aa583ad0a7ba870)
 
 **Date**: May 31st, 2026
 
