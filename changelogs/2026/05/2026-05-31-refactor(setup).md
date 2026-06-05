@@ -1,4 +1,4 @@
-**refactor(setup): add multi-distro support, improve .env and DB provisioning**
+**refactor(setup): add multi-distro support with improved .env handling, and hardened database provisioning**
 
 **Contributor**: The-Sycorax (https://github.com/The-Sycorax)
 
