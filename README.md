@@ -77,20 +77,25 @@
 
 <dl><dd>
 
-### Node Setup
+### Node Setup:
 
 <dl><dd>
 
-**Automated configuration and deployment of a Denaro node can be achieved by using either the `setup.sh` script or `Docker`. Both methods ensure that all prerequisites for operating a Denaro node are met and properly configured according to the user's preference.**
+**Configuration and deployment of a Denaro node can be achieved using one of three methods: the `setup.sh` script, `Docker`, or a manual setup. The `setup.sh` script and `Docker` automate the installation of all prerequisites and configure the node according to user preference, while the manual setup allows full control over each step of the setup process.**
 
 **It is highly recommended to review the [Environment Configuration](#environment-configuration) section before setting up a Denaro node.**
 
+<a id="setup-via-setup.sh"></a>
 <details>
 <summary><b>Setup via setup.sh:</b></summary>
 
 <dl><dd>
 
-The `setup.sh` script is designed for traditional configuration and deployment of a single Denaro node. It automatically handles system package updates, manages environment variables, configures the PostgreSQL database, sets up a Python virtual environment, installs the required Python dependencies, and runs the Denaro node.
+The `setup.sh` script automates the configuration and deployment of a single Denaro node. It handles system package installation, environment configuration, PostgreSQL database setup, Python virtual environment creation, dependency installation, and node startup.
+
+**Prerequisites:** A Linux distribution (or WSL2), `git`, and user with `sudo` privileges.
+
+*Refer to the [System Package Installation](#system-package-installation) subsection below for the list of supported package managers and required system packages.*
 
 **Commands:**
 
@@ -107,7 +112,7 @@ cd denaro
 chmod +x setup.sh
 
 # Execute the setup script with optional arguments if needed.
-./setup.sh [--skip-prompts] [--setup-db] [--skip-package-install]
+./setup.sh [--skip-prompts] [--setup-db] [--skip-package-install] [--package-manager <name>]
 ```
 
 </dd></dl>
@@ -117,41 +122,41 @@ chmod +x setup.sh
 
 <dl><dd>
 
-- `--skip-prompts`: Executes the setup script in an automated manner without requiring user input, bypassing all interactive prompts.
+- `--skip-prompts`: Runs the setup script non-interactively, bypasses all interactive prompts, and uses default values for all configuration variables.
 
-- `--setup-db`: Limits the setup script's actions to only configure the PostgreSQL database, excluding the execution of other operations such as virtual environment setup and dependency installation.
+- `--setup-db`: Limits the setup script's actions to system package installation and PostgreSQL database configuration. Skips Python virtual environment setup, dependency installation, and node startup.
 
-- `--skip-package-install`: Skips `apt` package installation. This argument can be used for Linux distributions that do not utilize `apt` as a package manager. However, it is important that the required system packages are installed prior to running the setup script (For more details refer to: *Installation for Non-Debian Based Systems*).
+- `--skip-package-install`: Skips the system package installation step. Should be used on distributions whose package manager is not natively supported by the script.
 
-</dd></dl>
-</details>
-
-<details>
-<summary><b>Installation for Non-Debian Based Systems:</b></summary>
-
-<dl><dd>
-
-The setup script is designed for Linux distributions that utilize `apt` as their package manager (e.g. Debian/Ubuntu). If system package installation is unsuccessful, it is most likely due to the absence of `apt` on your system. This is generally the case for Non-Debian Linux distributions. Therefore, the required system packages must be installed manually.
-
-<details>
-<summary><b>Required Packages:</b></summary>
-
-<dl><dd>
-
-*Note: It is nessessary to ensure that the package names specified are adjusted to correspond with those recognized by your package manager.*
-
-- `gcc`
-- `libgmp-dev`
-- `libpq-dev`
-- `postgresql-15`
-- `python3`
-- `python3-venv`
-- `sudo`
+- `--package-manager <name>`: Overrides the auto-detected package manager. Accepts `apt`, `dnf`, `pacman`, or `zypper`.
 
 </dd></dl>
 </details>
 
-Once the required packages have been installed, the `--skip-package-install` argument can be used with the setup script to bypass operations that require `apt`. This should mitigate any unsucessful execution related to package installation, allowing the setup script to proceed.
+<a id="system-package-installation"></a>
+<details>
+<summary><b>System Package Installation:</b></summary>
+
+<dl><dd>
+
+The setup script automatically detects the system's package manager and installs all required system packages. This can be overridden via the `--package-manager` argument. 
+
+The following package managers are supported:
+- `apt` (Debian, Ubuntu, and derivatives)
+- `dnf` (Fedora, RHEL 8+, Rocky Linux, AlmaLinux)
+- `pacman` (Arch Linux, Manjaro)
+- `zypper` (openSUSE, SUSE Linux Enterprise)
+
+For distributions that use a different package manager, the required system packages must be installed manually before running the script with the `--skip-package-install` argument. 
+
+Additionally, it is nessessary to ensure that the package names specified are adjusted to correspond with those recognized by your package manager, and that Python version 3.8 or higher is installed.
+
+**Required Packages:**
+
+- **Debian / Ubuntu (`apt`):** `gcc`, `libgmp-dev`, `libpq-dev`, `postgresql`, `python3`, `python3-dev`, `python3-venv`
+- **Fedora / RHEL (`dnf`):** `gcc`, `gmp-devel`, `libpq-devel`, `postgresql-server`, `python3`, `python3-devel`
+- **Arch Linux (`pacman`):** `gcc`, `gmp`, `postgresql-libs`, `postgresql`, `python`
+- **openSUSE (`zypper`):** `gcc`, `gmp-devel`, `postgresql-devel`, `postgresql-server`, `python3`, `python3-devel`
 
 </dd></dl>
 </details>
@@ -169,6 +174,8 @@ The Docker setup provides a containerized deployment option for Denaro nodes. Un
 At the core of the Docker setup is the `docker-entrypoint.sh` script, which automates the configuration and deployment of each node. When a node's container starts, this script automatically provisions the PostgreSQL database, generates the necessary environment configuration, handles bootstrap node selection, and starts the Denaro node. Docker coordinates the supporting services, shared resources, and startup order of each container.
 
 To test public node behavior over the Internet, the Docker setup includes optional support for exposing a node on the Internet by establishing an SSH reverse tunnel via [Pinggy.io's free tunnleing service](https://www.pinggy.io). *For more information please refer to: [2025-09-18-refactor(docker).md: Optional Public Node Tunnleing](https://github.com/The-Sycorax/denaro/blob/main/changelogs/2025/09/2025-09-18-refactor(docker).md#optional-public-node-tunnleing)*.
+
+**Prerequisites:** A Linux distribution (or WSL2), `git`, `Docker` and the `Docker Compose` plugin installed, and a user with permissions to run `docker` commands.
 
 **Commands:**
 
@@ -346,6 +353,202 @@ volumes:
 
 </dd></dl>
 </details>
+
+</dd></dl>
+</details>
+
+</dd></dl>
+</details>
+
+<a id="manual-setup"></a>
+<details>
+<summary><b>Manual Setup:</b></summary>
+
+<dl><dd>
+
+A Denaro node can also be configured and deployed manually without the use of the `setup.sh` script or Docker. This is useful for users that require full control over the configuration process, or for systems where the automated setup script is not viable. 
+
+The steps below replicate the operations performed by the `setup.sh` script, including system package installation, environment configuration, PostgreSQL database setup, Python virtual environment creation, and node startup.
+
+**Prerequisites:** A Linux distribution (or WSL2), `git`, and user with `sudo` privileges.
+
+<details>
+<summary><b>1. Install Required System Packages:</b></summary>
+
+<dl><dd>
+
+*Refer to the [System Package Installation](#system-package-installation) subsection of [Setup via setup.sh](#setup-via-setup.sh) for the list of supported package managers and required system packages.*
+
+</dd></dl>
+</details>
+
+<details>
+<summary><b>2. Clone the Repository:</b></summary>
+
+<dl><dd>
+
+```bash
+# Clone the Denaro repository to your local machine.
+git clone https://github.com/The-Sycorax/denaro.git
+
+# Change directory to the cloned repository.
+cd denaro
+```
+
+</dd></dl>
+</details>
+
+<details>
+<summary><b>3. Configure the <code>.env</code> File:</b></summary>
+
+<dl><dd>
+
+Create a `.env` file in the root of the Denaro directory and define the required environment variables. *For details on each variable please refer to the [Environment Configuration](#environment-configuration) section.*
+
+**Example <code>.env</code> file ([.env.example](.env.example)):**
+
+<dl><dd>
+
+```bash
+POSTGRES_USER='denaro'
+POSTGRES_PASSWORD='denaro'
+DENARO_DATABASE_NAME='denaro'
+DENARO_DATABASE_HOST='127.0.0.1'
+
+DENARO_NODE_HOST='127.0.0.1'
+DENARO_NODE_PORT='3006'
+DENARO_SELF_URL=''
+DENARO_BOOTSTRAP_NODE='http://node.denaro.network'
+
+LOG_LEVEL='INFO'
+LOG_FORMAT='%(asctime)s - %(levelname)s - %(name)s - %(message)s'
+LOG_DATE_FORMAT='%Y-%m-%dT%H:%M:%S'
+LOG_CONSOLE_HIGHLIGHTING='True'
+LOG_INCLUDE_REQUEST_CONTENT='False'
+LOG_INCLUDE_RESPONSE_CONTENT='False'
+LOG_INCLUDE_BLOCK_SYNC_MESSAGES='False'
+```
+
+</dd></dl>
+
+The default values shown above are sufficient for a local node. The values defined for `POSTGRES_USER`, `POSTGRES_PASSWORD`, and `DENARO_DATABASE_NAME` must match those used during the PostgreSQL database setup in the next step.
+
+</dd></dl>
+</details>
+
+<details>
+<summary><b>4. Configure the PostgreSQL Database:</b></summary>
+
+<dl><dd>
+
+This step creates the database, creates the database user, sets the password, grants privileges, and assigns ownership. The values used in the commands below should match those defined in the `.env` file.
+
+**Create the database, user, and grant privileges:**
+
+<dl><dd>
+
+```bash
+# Create the Denaro database.
+sudo -u postgres psql -c "CREATE DATABASE denaro;"
+
+# Create the database user.
+sudo -u postgres psql -c "CREATE USER denaro;"
+
+# Set the password for the database user.
+sudo -u postgres psql -c "ALTER USER denaro WITH PASSWORD 'denaro';"
+
+# Grant privileges on the database to the user.
+sudo -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE denaro TO denaro;"
+sudo -u postgres psql -d denaro -c "GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO denaro;"
+sudo -u postgres psql -d denaro -c "GRANT ALL ON SCHEMA public TO denaro;"
+
+# Assign ownership of the database to the user.
+sudo -u postgres psql -c "ALTER DATABASE denaro OWNER TO denaro;"
+```
+
+</dd></dl>
+
+**Enable password authentication:**
+
+<dl><dd>
+
+PostgreSQL must be configured to allow password (`md5`) authentication for local Unix domain socket connections. To do so the `pg_hba.conf` must be modified. This file is typically located at `/etc/postgresql/<PG_VERSION>/main/pg_hba.conf`, where `<PG_VERSION>` is the major version of the installed PostgreSQL package. 
+
+Change the following line:
+
+```
+local   all             all                                     peer
+```
+
+To:
+
+```
+local   all             all                                     md5
+```
+
+Then restart PostgreSQL for the changes to take effect:
+
+```bash
+sudo service postgresql restart
+```
+
+</dd></dl>
+
+**Import the database schema:**
+
+<dl><dd>
+
+```bash
+# Import the Denaro database schema.
+PGPASSWORD='denaro' psql -U denaro -d denaro -f denaro/schema.sql
+```
+
+*Replace the `PGPASSWORD` value, `-U` argument, and `-d` argument with those defined in the `.env` file.*
+
+</dd></dl>
+
+</dd></dl>
+</details>
+
+<details>
+<summary><b>5. Create a Python Virtual Environment and Install Dependencies:</b></summary>
+
+<dl><dd>
+
+A Python virtual environment is highly recommended to avoid conflicts with system-wide Python packages.
+
+```bash
+# Create the virtual environment in ./venv.
+python3 -m venv venv
+
+# Activate the virtual environment.
+source venv/bin/activate
+
+# Install the required Python packages.
+pip install -r requirements.txt
+```
+
+To deactivate the virtual environment at any time, run `deactivate`.
+
+</dd></dl>
+</details>
+
+<details>
+<summary><b>6. Start the Node:</b></summary>
+
+<dl><dd>
+
+With all prerequisites configured, the Denaro node can be started:
+
+```bash
+# Start the Denaro node.
+python3 run_node.py
+
+# Manualy start the Denaro node via uvicorn (Optional).
+uvicorn denaro.node.main:app --host 127.0.0.1 --port 3006 
+```
+
+The node binds to the host and port defined by `DENARO_NODE_HOST` and `DENARO_NODE_PORT` in the `.env` file. To stop the node, press `Ctrl+C` in the terminal.
 
 </dd></dl>
 </details>
@@ -875,9 +1078,11 @@ To connect, use the nessessary values and credentials defined in the `.env` file
 
 ## Running a Denaro Node
 
-*Note: This section dose not apply to nodes deployed using Docker.*
+*Note: The information in this section is already covered in the [Manual Setup](#manual-setup) section, but is included here for easy reference. This section dose not apply to nodes deployed using Docker.*
 
-A Denaro node can be started manually if you have already executed the `setup.sh` script and chose not to start the node immediately, or if you need to start the node in a new terminal session. If the setup script was used with the `--setup-db` argument or manual installation was performed, it is reccomended that a Python virtual environment is created and that the required Python packages are installed prior to starting a node.
+A Denaro node can be started manually if you have already executed the `setup.sh` script and chose not to start the node immediately, or if you need to start the node in a new terminal session. 
+
+It is recommended that a Python virtual environment is activated and that the required Python packages are installed prior to starting a node, particularly if the setup script was run with the `--setup-db` argument or if the installation was performed manually.
 
 **Commands to manually start a node:**
 
