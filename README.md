@@ -1062,7 +1062,7 @@ Any PostgreSQL-compatible GUI client can be used to connect to the database. Pop
 
 - **[DataGrip](https://www.jetbrains.com/datagrip/)** — A JetBrains IDE with advanced SQL editing and database management features.
 
-To connect, use the nessessary values and credentials defined in the `.env` file. The database should generally be accessible at `127.0.0.1:5432` from the host machine.
+To connect, use the nessessary values and credentials defined in the node's `.env` file. The database should generally be accessible at `127.0.0.1:5432` from the host machine. However, this address may be different if deployed using Docker.
 
 </dd></dl>
 </details>
@@ -1078,7 +1078,7 @@ To connect, use the nessessary values and credentials defined in the `.env` file
 
 ## Running a Denaro Node
 
-*Note: The information in this section is already covered in the [Manual Setup](#manual-setup) section, but is included here for easy reference. This section dose not apply to nodes deployed using Docker.*
+*Note: The information in this section is already documented in the [Manual Setup](#manual-setup) section, but is included here for easy reference. This section dose not apply to nodes deployed using Docker.*
 
 A Denaro node can be started manually if you have already executed the `setup.sh` script and chose not to start the node immediately, or if you need to start the node in a new terminal session. 
 
@@ -1137,7 +1137,7 @@ To setup a nodeless wallet, use [Denaro Wallet Client GUI](https://github.com/Th
 
 <dl><dd>
 
-- **Block Hashing**:
+- **Block Hashing Algorithm**:
   - Utilizes the SHA256 algorithm for block hashing.
   - The hash of a block must begin with the last `difficulty` hexadecimal characters of the hash from the previously mined block.
   - `difficulty` can have decimal digits, which restricts the `difficulty + 1`st character of the derived hash to have a limited set of values.
@@ -1145,7 +1145,7 @@ To setup a nodeless wallet, use [Denaro Wallet Client GUI](https://github.com/Th
     ```python
     from math import ceil
 
-    difficulty = 6.3
+    difficulty = 6.0
     decimal = difficulty % 1
 
     charset = '0123456789abcdef'
@@ -1174,7 +1174,7 @@ To setup a nodeless wallet, use [Denaro Wallet Client GUI](https://github.com/Th
 
 - **CPU Mining**:
 
-  The CPU miner script (`./miner/cpu_miner.py`) can be used to mine Denaro.
+  The CPU miner script ([cpu_miner.py](miner/cpu_miner.py)) can be used to mine Denaro on any machine with Python version 3.8 or higher installed.
           
   <details>
   <summary><b>Usage:</b></summary>
@@ -1208,7 +1208,7 @@ To setup a nodeless wallet, use [Denaro Wallet Client GUI](https://github.com/Th
   
   - #### Mining while connected to a Remote Node    
     ```bash
-    python3 miner/cpu_miner.py --address WALLET_ADDRESS --node http://a-public-node.com:3006
+    python3 miner/cpu_miner.py --address WALLET_ADDRESS --node https://denaro.network
     ```
   
   - #### Mining with Multiple Cores    
@@ -1223,8 +1223,10 @@ To setup a nodeless wallet, use [Denaro Wallet Client GUI](https://github.com/Th
   </details>
 
 - **GPU Mining**:
+  
+  The GPU mining script ([cuda_miner.py](miner/cuda_miner.py)) can be used to mine Denaro with a modern Nvidia GPU that supports CUDA.
 
-  For GPU mining please refer to [Denaro CUDA Miner Setup and Usage](https://github.com/The-Sycorax/denaro/tree/main/miner).
+  For more information on GPU mining please refer to [Denaro CUDA Miner Setup and Usage](https://github.com/The-Sycorax/denaro/tree/main/miner).
 
 </dd></dl>
 </details>
@@ -1266,7 +1268,7 @@ curl http://127.0.0.1:3006/sync_blockchain
 
 <dl><dd>
 
-The endpoint accepts an optional `node_id` parameter to sync from a specific peer. The node ID of a peer can be found in the `./denaro/node/nodes.json` file:
+The endpoint accepts an optional `node_id` parameter to sync from a specific peer. The node ID of a peer can be found in the `./data/active_peers.json` file, or via a node's `/get_peers` endpoint:
 
 <dl><dd>
 
