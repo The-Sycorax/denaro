@@ -64,11 +64,12 @@
 * **Denaro Nodes:**
   * **[https://node.denaro.network](https://node.denaro.network/)**
   * **[https://node-2.denaro.network](https://node-2.denaro.network/)**
+  * **[https://denaro.dasnode.xyz]( https://denaro.dasnode.xyz/)**
   * **[https://denaro-node.aldgram-solutions.fr](https://denaro-node.aldgram-solutions.fr/)**
 
 * **Blockchain Explorers:**
-  * **[https://denaro-explorer.aldgram-solutions.fr](https://denaro-explorer.aldgram-solutions.fr/)**
   * **[https://denaro-revival.netlify.app](https://denaro-revival.netlify.app/)**
+  * **[https://denaro-explorer.aldgram-solutions.fr](https://denaro-explorer.aldgram-solutions.fr/)**
 * **Discord Server: [https://discord.gg/4Sq2dK4KMv](https://discord.gg/4Sq2dK4KMv)**
 
 ---
