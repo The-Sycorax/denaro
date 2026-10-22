@@ -42,7 +42,7 @@
 
 ---
 
-<img src="https://node.denaro.network/height.png?t=3" alt="Denaro's Current Block Height" width="150">
+<img src="https://node.denaro.network/height.png?t=5" alt="Denaro's Current Block Height" width="150">
 
 ### Denaro Projects:
 * **[The-Sycorax](https://github.com/The-Sycorax) / [Denaro Wallet Client GUI](https://github.com/The-Sycorax/DenaroWalletClient-GUI)**
@@ -61,12 +61,17 @@
 
 ### Links:
 * **Denaro Nodes:**
-  * **[https://node.denaro.network](https://node.denaro.network/)**
-  * **[https://node-2.denaro.network](https://node-2.denaro.network/)**
-  * **[https://denaro.dasnode.xyz]( https://denaro.dasnode.xyz/)**
+  * **[https://node.denaro.network](https://node.denaro.network/)** ![Website](https://img.shields.io/website?url=https%3A%2F%2Fnode.denaro.network%2Fdocs&up_message=ONLINE&down_message=OFFLINE&style=flat&label=%20)
+
+  * **[https://node-2.denaro.network](https://node-2.denaro.network/)** ![Website](https://img.shields.io/website?url=https%3A%2F%2Fnode-2.denaro.network%2Fdocs&up_message=ONLINE&down_message=OFFLINE&style=flat&label=%20)
+
+  * **[https://denaro.dasnode.xyz]( https://denaro.dasnode.xyz/)** ![Website](https://img.shields.io/website?url=https%3A%2F%2Fdenaro.dasnode.xyz%2Fdocs&up_message=ONLINE&down_message=OFFLINE&style=flat&label=%20)
 
 * **Blockchain Explorers:**
-  * **[https://denaro-revival.netlify.app](https://denaro-revival.netlify.app/)**
+  * **[https://denaro-revival.netlify.app](https://denaro-revival.netlify.app/)** ![Website](https://img.shields.io/website?url=https%3A%2F%2Fdenaro.dasnode.xyz%2Fdocs&up_message=ONLINE&down_message=OFFLINE&style=flat&label=%20)
+
+
+
 
 * **Discord Server: [https://discord.gg/4Sq2dK4KMv](https://discord.gg/4Sq2dK4KMv)**
 
